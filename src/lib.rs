@@ -1,151 +1,115 @@
-use std::{ io, mem };
-use std::time::Instant;
-use std::sync::{ Arc, Mutex };
-use std::collections::HashMap;
+use quiche::{Connection, ConnectionId};
 use rand::Rng;
-use smallvec::SmallVec;
-use futures::{ try_ready, Future, Stream, Sink, Poll, Async, StartSend, AsyncSink };
-use tokio_timer::Delay;
-use tokio_udp::UdpSocket;
-use tokio_sync::{ mpsc, oneshot };
-
+use std::{
+    collections::HashMap,
+    error::Error,
+    future::Future,
+    io,
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Poll},
+};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, ReadBuf},
+    net::{ToSocketAddrs, UdpSocket},
+    sync::{
+        mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+        oneshot, Mutex, MutexGuard,
+    },
+};
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const STREAM_BUFFER_SIZE: usize = 64 * 1024;
 
-pub struct QuicConnector {
-    config: Arc<Mutex<quiche::Config>>
+#[derive(Debug)]
+enum Message {
+    Data {
+        stream_id: u64,
+        bytes: Vec<u8>,
+        fin: bool,
+    },
+    Close(u64),
 }
 
-pub struct Connecting {
-    is_server: bool,
-    inner: MidHandshake
+// Setup a connection
+pub struct QuicSocket {
+    config: quiche::Config,
 }
 
-enum MidHandshake {
-    Handshaking(Inner),
-    End
-}
+impl QuicSocket {
+    pub fn new(config: quiche::Config) -> Self {
+        Self { config }
+    }
 
-pub struct Connection {
-    anchor: Arc<Anchor>,
-    open_send: mpsc::UnboundedSender<oneshot::Sender<InnerStream>>,
-}
+    pub async fn connect(
+        &mut self,
+        io: UdpSocket,
+        server_name: Option<&str>,
+    ) -> Result<QuicConnection, Box<dyn Error>> {
+        let mut scid = vec![0; 16];
+        rand::thread_rng().fill(&mut *scid);
+        let scid: ConnectionId = scid.into();
+        let connection = quiche::connect(
+            server_name,
+            &scid,
+            io.local_addr()?,
+            io.peer_addr()?,
+            &mut self.config,
+        )?;
 
-pub struct Incoming {
-    anchor: Arc<Anchor>,
-    rx: mpsc::UnboundedReceiver<InnerStream>
-}
+        let mut inner = Inner {
+            io,
+            connection,
+            send_flush: false,
+            send_end: 0,
+            send_pos: 0,
+            recv_buf: vec![0; STREAM_BUFFER_SIZE],
+            send_buf: vec![0; MAX_DATAGRAM_SIZE],
+        };
 
-struct Anchor(Option<oneshot::Sender<()>>);
+        let handshake = Handshaker(&mut inner);
+        handshake.await?;
 
-impl Drop for Anchor {
-    fn drop(&mut self) {
-        if let Some(tx) = self.0.take() {
-            let _ = tx.send(());
-        }
+        Ok(QuicConnection::new(inner, false))
     }
 }
 
-pub struct Driver {
-    is_server: bool,
-    inner: Inner,
-    max_id: u64,
-    close_recv: Option<oneshot::Receiver<()>>,
-    close_queue: Vec<u64>,
-    incoming_send: mpsc::UnboundedSender<InnerStream>,
-    event_send: mpsc::UnboundedSender<(u64, Message)>,
-    event_recv: mpsc::UnboundedReceiver<(u64, Message)>,
-    open_recv: mpsc::UnboundedReceiver<oneshot::Sender<InnerStream>>,
-    stream_map: HashMap<u64, mpsc::UnboundedSender<quiche::Result<Message>>>,
-    stream_buf: Vec<u8>
-}
+struct Handshaker<'a>(&'a mut Inner);
 
-pub struct Opening {
-    anchor: Option<Arc<Anchor>>,
-    rx: oneshot::Receiver<InnerStream>
-}
+impl<'a> Future for Handshaker<'a> {
+    type Output = io::Result<()>;
 
-pub struct QuicStream {
-    _anchor: Arc<Anchor>,
-    inner: InnerStream,
-}
-
-struct InnerStream {
-    id: u64,
-    event_send: mpsc::UnboundedSender<(u64, Message)>,
-    rx: mpsc::UnboundedReceiver<quiche::Result<Message>>
-}
-
-#[derive(Debug)]
-enum Message {
-    Bytes(Vec<u8>),
-    End(Vec<u8>),
-    Close,
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        while !self.0.connection.is_established() {
+            if let Ok(opt) = ready!(self.0.poll_io_complete(cx)) {
+                if opt.is_none() && !self.0.connection.is_established() {
+                    return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
+                }
+            }
+        }
+        println!("Handshake Complete");
+        Poll::Ready(Ok(()))
+    }
 }
 
 struct Inner {
     io: UdpSocket,
-    #[allow(dead_code)] scid: Vec<u8>,
-    connect: Box<quiche::Connection>,
-    timer: Option<Delay>,
-    send_buf: Vec<u8>,
-    send_pos: usize,
-    send_end: usize,
+    connection: Connection,
     send_flush: bool,
+    send_end: usize,
+    send_pos: usize,
     recv_buf: Vec<u8>,
-}
-
-impl From<quiche::Config> for QuicConnector {
-    fn from(config: quiche::Config) -> QuicConnector {
-        QuicConnector { config: Arc::new(Mutex::new(config)) }
-    }
-}
-
-impl QuicConnector {
-    pub fn connect(&self, server_name: &str, io: UdpSocket) -> io::Result<Connecting> {
-        let mut scid = vec![0; 16];
-        rand::thread_rng().fill(&mut *scid);
-        quiche::connect(Some(server_name), &scid, &mut self.config.lock().unwrap())
-            .map(move |connect| Connecting {
-                is_server: false,
-                inner: MidHandshake::Handshaking(Inner {
-                    io, scid, connect,
-                    timer: None,
-                    send_buf: vec![0; MAX_DATAGRAM_SIZE],
-                    send_pos: 0,
-                    send_end: 0,
-                    send_flush: false,
-                    recv_buf: vec![0; STREAM_BUFFER_SIZE]
-                })
-            })
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-    }
-
-    pub fn accept(&self, io: UdpSocket) -> io::Result<Connecting> {
-        let mut scid = vec![0; 16];
-        rand::thread_rng().fill(&mut *scid);
-        quiche::accept(&scid, None, &mut self.config.lock().unwrap())
-            .map(move |connect| Connecting {
-                is_server: false,
-                inner: MidHandshake::Handshaking(Inner {
-                    io, scid, connect,
-                    timer: None,
-                    send_buf: vec![0; MAX_DATAGRAM_SIZE],
-                    send_pos: 0,
-                    send_end: 0,
-                    send_flush: false,
-                    recv_buf: vec![0; STREAM_BUFFER_SIZE]
-                })
-            })
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-    }
+    send_buf: Vec<u8>,
 }
 
 impl Inner {
-    fn poll_io_complete(&mut self) -> Poll<Option<()>, io::Error> {
+    fn poll_io_complete(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<Option<()>, io::Error>> {
+        /*
         if let Some(timer) = self.timer.as_mut() {
-            if let Ok(Async::Ready(())) = timer.poll() {
+            if let Ok(Poll::Ready(())) = timer.poll() {
                 self.connect.on_timeout();
             }
         }
@@ -160,22 +124,21 @@ impl Inner {
             let _ = self.timer.poll();
         } else {
             self.timer = None;
-        }
+        }*/
+        let recv_result = self.poll_recv(cx)?;
+        let send_result = self.poll_send(cx)?;
 
-        let recv_result = self.poll_recv()?;
-        let send_result = self.poll_send()?;
-
-        match (self.connect.is_closed(), recv_result, send_result) {
-            (true, ..) => Ok(Async::Ready(None)),
-            (false, Async::NotReady, Async::NotReady) => Ok(Async::NotReady),
-            (..) => Ok(Async::Ready(Some(())))
+        match (self.connection.is_closed(), recv_result, send_result) {
+            (true, ..) => Poll::Ready(Ok(None)),
+            (false, Poll::Pending, Poll::Pending) => Poll::Pending,
+            (..) => Poll::Ready(Ok(Some(()))),
         }
     }
 
-    fn poll_send(&mut self) -> Poll<(), io::Error> {
+    fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
         if self.send_flush {
             while self.send_pos != self.send_end {
-                let n = try_ready!(self.io.poll_send(&mut self.send_buf[self.send_pos..]));
+                let n = ready!(self.io.poll_send(cx, &mut self.send_buf[self.send_pos..]))?;
                 self.send_pos += n;
             }
 
@@ -184,272 +147,291 @@ impl Inner {
             self.send_flush = false;
         }
 
-        match self.connect.send(&mut self.send_buf[self.send_end..]) {
-            Ok(n) => {
+        match self.connection.send(&mut self.send_buf[self.send_end..]) {
+            Ok((n, _info)) => {
                 self.send_end += n;
-                self.send_flush = self.send_end == self.send_buf.len() - 1;
-            },
+                self.send_flush = self.send_end == self.send_buf.len();
+            }
             Err(quiche::Error::Done) if self.send_pos != self.send_end => (),
-            Err(quiche::Error::Done) => return Ok(Async::NotReady),
+            Err(quiche::Error::Done) => return Poll::Pending,
             Err(quiche::Error::BufferTooShort) => {
                 self.send_flush = true;
-                return Ok(Async::Ready(()));
-            },
+                return Poll::Ready(Ok(()));
+            }
             Err(err) => {
-                self.connect.close(false, err.to_wire(), b"fail")
+                self.connection
+                    .close(false, to_wire(err), b"fail")
                     .map_err(to_io_error)?;
-                return Ok(Async::NotReady);
+                return Poll::Pending;
             }
         }
 
-        let n = try_ready!(self.io.poll_send(&mut self.send_buf[self.send_pos..self.send_end]));
+        let n = ready!(self.io.poll_send(cx, &mut self.send_buf[self.send_pos..self.send_end]))?;
         self.send_pos += n;
 
-        Ok(Async::Ready(()))
+        Poll::Ready(Ok(()))
     }
 
-    fn poll_recv(&mut self) -> Poll<(), io::Error> {
-        let n = try_ready!(self.io.poll_recv(&mut self.recv_buf));
-
-        match self.connect.recv(&mut self.recv_buf[..n]) {
-            Ok(_) => Ok(Async::Ready(())),
-            Err(quiche::Error::Done) => Ok(Async::Ready(())),
+    fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
+        let buf = &mut ReadBuf::new(&mut self.recv_buf);
+        let from = ready!(self.io.poll_recv_from(cx, buf))?;
+        let info = quiche::RecvInfo {
+            from,
+            to: self.io.local_addr()?,
+        };
+        match self.connection.recv(buf.filled_mut(), info) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(quiche::Error::Done) => Poll::Ready(Ok(())),
             Err(err) => {
-                self.connect.close(false, err.to_wire(), b"fail")
+                self.connection
+                    .close(false, to_wire(err), b"fail")
                     .map_err(to_io_error)?;
-                Ok(Async::NotReady)
+                Poll::Pending
             }
         }
     }
 }
 
-impl Future for Connecting {
-    type Item = (Driver, Connection, Incoming);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        if let MidHandshake::Handshaking(inner) = &mut self.inner {
-            while !inner.connect.is_established() {
-                if try_ready!(inner.poll_io_complete()).is_none() && !inner.connect.is_established() {
-                    return Err(io::ErrorKind::UnexpectedEof.into());
-                }
-            }
-        }
-
-        match mem::replace(&mut self.inner, MidHandshake::End) {
-            MidHandshake::Handshaking(inner) => {
-                let (anchor, close_recv) = oneshot::channel();
-                let anchor = Arc::new(Anchor(Some(anchor)));
-                let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
-                let (event_send, event_recv) = mpsc::unbounded_channel();
-                let (open_send, open_recv) = mpsc::unbounded_channel();
-
-                let connection = Connection {
-                    anchor: Arc::clone(&anchor),
-                    open_send
-                };
-
-                let incoming = Incoming { anchor, rx: incoming_recv };
-
-                let driver = Driver {
-                    is_server: self.is_server,
-                    inner, incoming_send,
-                    event_send, event_recv, open_recv,
-                    max_id: 0,
-                    close_recv: Some(close_recv),
-                    close_queue: Vec::new(),
-                    stream_map: HashMap::new(),
-                    stream_buf: vec![0; STREAM_BUFFER_SIZE],
-                };
-
-                Ok(Async::Ready((driver, connection, incoming)))
-            },
-            MidHandshake::End => panic!()
-        }
-    }
+// Backend Driver
+pub struct Driver {
+    inner: Inner,
+    stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>,
+    stream_next: Arc<Mutex<u64>>,
+    message_recv: UnboundedReceiver<Message>,
+    message_send: UnboundedSender<Message>,
+    incoming_send: UnboundedSender<QuicStream>,
 }
 
 impl Future for Driver {
-    type Item = ();
-    type Error = io::Error;
+    type Output = Result<(), io::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        let mut stream_buf = vec![0; STREAM_BUFFER_SIZE];
         loop {
-            while let Ok(Async::Ready(Some((id, msg)))) = self.event_recv.poll() {
-                let result = match msg {
-                    Message::Bytes(bytes) => self.inner.connect.stream_send(id, &bytes, false),
-                    Message::End(bytes) => self.inner.connect.stream_send(id, &bytes, true),
-                    Message::Close => {
-                        self.close_queue.push(id);
-                        self.inner.connect.stream_send(id, &[], true)
+            // Write Connection
+            while let Ok(result) = self.message_recv.try_recv() {
+                let (stream_id, result) = match result {
+                    Message::Data {
+                        stream_id,
+                        bytes,
+                        fin,
+                    } => {
+                        println!("Writing: {stream_id}");
+                        (stream_id, self.inner.connection.stream_send(stream_id, &bytes, fin))
+                    },
+                    Message::Close(stream_id) => {
+                        // TODO: Close the stream
+                        println!("Closing: {stream_id}");
+                        (stream_id, self.inner.connection.stream_send(stream_id, &[], true))
                     }
                 };
-
-                // TODO always write to end ?
                 if let Err(err) = result {
-                    if let Some(tx) = self.stream_map.get_mut(&id) {
-                        let _ = tx.try_send(Err(err));
+                    let mut map = pollster::block_on(self.stream_map.lock());
+                    if let Some(tx) = map.get_mut(&stream_id) {
+                        let _ = tx.send(Err(err));
                     }
                 }
             }
-
-            let readable = self.inner.connect
-                .readable()
-                .collect::<SmallVec<[_; 2]>>();
-            for id in readable {
-                if self.inner.connect.stream_finished(id) {
-                    continue
+            // Read Connection
+            for stream_id in self.inner.connection.readable() {
+                println!("Stream-{stream_id} is readable");
+                if self.inner.connection.stream_finished(stream_id) {
+                    continue;
                 }
+                let incoming_send = self.incoming_send.clone();
+                let map = self.stream_map.clone();
+                let mut map = pollster::block_on(map.lock());
 
-                let mut incoming_send = self.incoming_send.clone();
-                let event_send = self.event_send.clone();
+                let mut next = pollster::block_on(self.stream_next.lock());
 
-                let tx = self.stream_map.entry(id)
-                    .or_insert_with(move || {
-                        let (tx, rx) = mpsc::unbounded_channel();
-                        let _ = incoming_send.try_send(InnerStream { id, event_send, rx });
-                        tx
-                    });
+                let message_send = self.message_send.clone();
+                let tx = map.entry(stream_id).or_insert_with(move || {
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    incoming_send
+                        .send(QuicStream {
+                            id: stream_id,
+                            rx,
+                            tx: message_send,
+                        })
+                        .unwrap();
+                    if stream_id >= *next {
+                        *next += stream_id + 1;
+                    }
+                    tx
+                });
 
-                match self.inner.connect.stream_recv(id, &mut self.stream_buf) {
-                    Ok((n, fin)) => {
-                        let _ = tx.try_send(Ok(if fin {
-                            Message::End(self.stream_buf[..n].to_vec())
-                        } else {
-                            Message::Bytes(self.stream_buf[..n].to_vec())
+                match self.inner.connection.stream_recv(stream_id, &mut stream_buf) {
+                    Ok((len, fin)) => {
+                        let _ = tx.send(Ok(Message::Data {
+                            stream_id,
+                            bytes: stream_buf[..len].to_vec(),
+                            fin,
                         }));
-                    },
+                    }
                     Err(err) => {
-                        let _ = tx.try_send(Err(err));
+                        let _ = tx.send(Err(err));
                     }
                 }
             }
-
-            while let Ok(Async::Ready(Some(sender))) = self.open_recv.poll() {
-                // always bidi stream
-                let id = (self.max_id << 2) + if self.is_server { 1 } else { 0 };
-                let event_send = self.event_send.clone();
-                let (tx, rx) = mpsc::unbounded_channel();
-                if sender.send(InnerStream { id, event_send, rx }).is_ok() {
-                    self.stream_map.insert(id, tx);
-                    self.max_id += 1;
+            // IO
+            if let Ok(opt) = ready!(self.inner.poll_io_complete(cx)) {
+                if opt.is_none() {
+                    return Poll::Ready(Ok(()));
                 }
             }
-
-            if let Some(mut close_recv) = self.close_recv.take() {
-                if let Ok(Async::Ready(())) = close_recv.poll() {
-                    self.inner.connect.close(true, 0x0, b"closing").map_err(to_io_error)?;
-                } else {
-                    self.close_recv = Some(close_recv);
-                }
-            }
-
-            while let Some(id) = self.close_queue.pop() {
-                self.stream_map.remove(&id);
-            }
-
-            if try_ready!(self.inner.poll_io_complete()).is_none() {
-                return Ok(Async::Ready(()));
-            }
         }
     }
 }
 
-impl Stream for Incoming {
-    type Item = QuicStream;
-    type Error = ();
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match self.rx.poll() {
-            Ok(Async::Ready(Some(inner))) => Ok(Async::Ready(Some(QuicStream {
-                inner,
-                _anchor: self.anchor.clone()
-            }))),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            _ => Ok(Async::Ready(None))
-        }
-    }
+// Handle multiple streams
+pub struct QuicConnection {
+    is_server: bool,
+    stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>, // Map each stream to a `Sender`
+    stream_next: Arc<Mutex<u64>>,           // Next available stream id
+    message_send: UnboundedSender<Message>, // This is passed to each stream.
+    incoming_recv: UnboundedReceiver<QuicStream>,
 }
 
-impl Connection {
-    pub fn open(&mut self) -> Opening {
-        let (tx, rx) = oneshot::channel();
+impl QuicConnection {
+    fn new(inner: Inner, is_server: bool) -> Self {
+        let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
+        let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let stream_next = Arc::new(Mutex::new(1));
+        let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
 
-        if self.open_send.try_send(tx).is_ok() {
-            Opening { anchor: Some(self.anchor.clone()), rx }
-        } else {
-            Opening { anchor: None, rx }
-        }
-    }
-}
-
-impl Future for Opening {
-    type Item = QuicStream;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let anchor = match self.anchor.take() {
-            Some(anchor) => anchor,
-            None => return Err(io::ErrorKind::ConnectionAborted.into())
+        let driver = Driver {
+            inner,
+            stream_map: stream_map.clone(),
+            stream_next: stream_next.clone(),
+            message_recv,
+            message_send: message_send.clone(),
+            incoming_send,
         };
 
-        match self.rx.poll() {
-            Ok(Async::Ready(inner)) => Ok(Async::Ready(QuicStream { _anchor: anchor, inner })),
-            Ok(Async::NotReady) => {
-                self.anchor = Some(anchor);
-                Ok(Async::NotReady)
+        tokio::spawn(driver);
+
+        Self {
+            is_server,
+            stream_map,
+            stream_next,
+            message_send,
+            incoming_recv,
+        }
+    }
+
+    #[inline]
+    pub async fn incoming(&mut self) -> Option<QuicStream> {
+        self.incoming_recv.recv().await
+    }
+
+    pub async fn open(&mut self) -> QuicStream {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut next = self.stream_next.lock().await;
+        let id = *next << 2 + if self.is_server { 1 } else { 0 };
+        let stream = QuicStream {
+            id,
+            rx,
+            tx: self.message_send.clone(),
+        };
+        let mut map = self.stream_map.lock().await;
+        map.insert(id, tx);
+        *next += 1;
+        stream
+    }
+}
+
+// Readable/Writeable stream
+#[derive(Debug)]
+pub struct QuicStream {
+    id: u64,
+    rx: UnboundedReceiver<Result<Message, quiche::Error>>,
+    tx: UnboundedSender<Message>,
+}
+
+impl AsyncRead for QuicStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.rx.poll_recv(cx) {
+            Poll::Ready(Some(message)) => match message {
+                Ok(Message::Data {
+                    stream_id: _,
+                    bytes,
+                    fin: _,
+                }) => {
+                    buf.put_slice(bytes.as_slice());
+                    buf.set_filled(bytes.len());
+                    Poll::Ready(Ok(()))
+                }
+                Ok(Message::Close(id)) => {
+                    println!("Closing");
+                    Poll::Ready(Ok(()))
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    Poll::Ready(Ok(()))
+                }
             },
-            Err(_) => Err(io::ErrorKind::ConnectionAborted.into())
+            Poll::Ready(None) => {
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "Whoops")))
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
 
-impl Sink for QuicStream {
-    type SinkItem = Vec<u8>;
-    type SinkError = io::Error;
-
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        match self.inner.event_send.start_send((self.inner.id, Message::Bytes(item))) {
-            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
-            Ok(AsyncSink::NotReady((_, Message::Bytes(item)))) => Ok(AsyncSink::NotReady(item)), // TODO unreachable
-            Ok(_) => unreachable!(),
-            Err(err) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, err))
+impl AsyncWrite for QuicStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        let message = Message::Data {
+            stream_id: self.id,
+            bytes: buf.to_vec(),
+            fin: false,
+        };
+        match self.tx.send(message) {
+            Ok(_) => Poll::Ready(Ok(buf.len())),
+            Err(err) => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, err))),
         }
     }
 
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        Ok(Async::Ready(()))
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    fn close(&mut self) -> Poll<(), Self::SinkError> {
-        match self.inner.event_send.start_send((self.inner.id, Message::Close)) {
-            Ok(AsyncSink::Ready) => Ok(Async::Ready(())),
-            Ok(AsyncSink::NotReady(_)) => Ok(Async::NotReady),
-            Err(err) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, err))
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        let message = Message::Close(self.id);
+        match self.tx.send(message) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(err) => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, err))),
         }
     }
 }
 
-impl Stream for QuicStream {
-    type Item = Vec<u8>;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match self.inner.rx.poll() {
-            Ok(Async::Ready(Some(Ok(Message::Bytes(item))))) => Ok(Async::Ready(Some(item))),
-            Ok(Async::Ready(Some(Ok(Message::End(item))))) => {
-                self.inner.rx.close();
-                Ok(Async::Ready(Some(item)))
-            },
-            Ok(Async::Ready(Some(Err(err)))) => Err(to_io_error(err)),
-            Ok(Async::Ready(Some(Ok(Message::Close)))) => {
-                self.inner.rx.close();
-                Ok(Async::Ready(None))
-            },
-            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(err) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, err))
-        }
+fn to_wire(err: quiche::Error) -> u64 {
+    match err {
+        quiche::Error::Done => 0x0,
+        quiche::Error::InvalidFrame => 0x7,
+        quiche::Error::InvalidStreamState(..) => 0x5,
+        quiche::Error::InvalidTransportParam => 0x8,
+        quiche::Error::FlowControl => 0x3,
+        quiche::Error::StreamLimit => 0x4,
+        quiche::Error::FinalSize => 0x6,
+        _ => 0xa,
     }
 }
 
