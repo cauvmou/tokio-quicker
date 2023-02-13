@@ -1,3 +1,4 @@
+//use h3::Http3Connection;
 use quiche::{Connection, ConnectionId};
 use rand::Rng;
 use std::{
@@ -18,8 +19,11 @@ use tokio::{
     },
 };
 
-const MAX_DATAGRAM_SIZE: usize = 1350;
-const STREAM_BUFFER_SIZE: usize = 64 * 1024;
+//mod h3;
+//mod util;
+
+pub const MAX_DATAGRAM_SIZE: usize = 1350;
+pub const STREAM_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
 enum Message {
@@ -87,7 +91,6 @@ impl<'a> Future for Handshaker<'a> {
                 }
             }
         }
-        println!("Handshake Complete");
         Poll::Ready(Ok(()))
     }
 }
@@ -166,7 +169,9 @@ impl Inner {
             }
         }
 
-        let n = ready!(self.io.poll_send(cx, &mut self.send_buf[self.send_pos..self.send_end]))?;
+        let n = ready!(self
+            .io
+            .poll_send(cx, &mut self.send_buf[self.send_pos..self.send_end]))?;
         self.send_pos += n;
 
         Poll::Ready(Ok(()))
@@ -219,13 +224,16 @@ impl Future for Driver {
                         bytes,
                         fin,
                     } => {
-                        println!("Writing: {stream_id}");
-                        (stream_id, self.inner.connection.stream_send(stream_id, &bytes, fin))
-                    },
+                        (
+                            stream_id,
+                            self.inner.connection.stream_send(stream_id, &bytes, fin),
+                        )
+                    }
                     Message::Close(stream_id) => {
-                        // TODO: Close the stream
-                        println!("Closing: {stream_id}");
-                        (stream_id, self.inner.connection.stream_send(stream_id, &[], true))
+                        (
+                            stream_id,
+                            self.inner.connection.stream_send(stream_id, &[], true),
+                        )
                     }
                 };
                 if let Err(err) = result {
@@ -237,7 +245,6 @@ impl Future for Driver {
             }
             // Read Connection
             for stream_id in self.inner.connection.readable() {
-                println!("Stream-{stream_id} is readable");
                 if self.inner.connection.stream_finished(stream_id) {
                     continue;
                 }
@@ -263,7 +270,11 @@ impl Future for Driver {
                     tx
                 });
 
-                match self.inner.connection.stream_recv(stream_id, &mut stream_buf) {
+                match self
+                    .inner
+                    .connection
+                    .stream_recv(stream_id, &mut stream_buf)
+                {
                     Ok((len, fin)) => {
                         let _ = tx.send(Ok(Message::Data {
                             stream_id,
@@ -342,6 +353,10 @@ impl QuicConnection {
         *next += 1;
         stream
     }
+
+    // pub fn upgrade(self, config: quiche::h3::Config) -> Http3Connection {
+    //     Http3Connection::new(self, config)
+    // }
 }
 
 // Readable/Writeable stream
@@ -370,7 +385,6 @@ impl AsyncRead for QuicStream {
                     Poll::Ready(Ok(()))
                 }
                 Ok(Message::Close(id)) => {
-                    println!("Closing");
                     Poll::Ready(Ok(()))
                 }
                 Err(err) => {
