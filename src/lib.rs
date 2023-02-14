@@ -1,4 +1,3 @@
-//use h3::Http3Connection;
 use quiche::{Connection, ConnectionId};
 use rand::Rng;
 use std::{
@@ -9,18 +8,19 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Poll},
+    time::Instant,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::{ToSocketAddrs, UdpSocket},
+    net::UdpSocket,
     sync::{
-        mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
-        oneshot, Mutex, MutexGuard,
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Mutex,
     },
 };
+use util::Timer;
 
-//mod h3;
-//mod util;
+mod util;
 
 pub const MAX_DATAGRAM_SIZE: usize = 1350;
 pub const STREAM_BUFFER_SIZE: usize = 64 * 1024;
@@ -69,6 +69,7 @@ impl QuicSocket {
             send_pos: 0,
             recv_buf: vec![0; STREAM_BUFFER_SIZE],
             send_buf: vec![0; MAX_DATAGRAM_SIZE],
+            timer: Timer::Unset,
         };
 
         let handshake = Handshaker(&mut inner);
@@ -103,6 +104,7 @@ struct Inner {
     send_pos: usize,
     recv_buf: Vec<u8>,
     send_buf: Vec<u8>,
+    timer: Timer,
 }
 
 impl Inner {
@@ -110,24 +112,16 @@ impl Inner {
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<Option<()>, io::Error>> {
-        /*
-        if let Some(timer) = self.timer.as_mut() {
-            if let Ok(Poll::Ready(())) = timer.poll() {
-                self.connect.on_timeout();
-            }
+        if self.timer.ready() {
+            self.connection.on_timeout();
         }
 
-        if let Some(timeout) = self.connect.timeout() {
-            if let Some(timer) = self.timer.as_mut() {
-                timer.reset(Instant::now() + timeout);
-            } else {
-                self.timer = Some(Delay::new(Instant::now() + timeout));
-            }
-
-            let _ = self.timer.poll();
+        if let Some(timeout) = self.connection.timeout() {
+            self.timer = Timer::Set(Instant::now() + timeout)
         } else {
-            self.timer = None;
-        }*/
+            self.timer = Timer::Unset;
+        }
+
         let recv_result = self.poll_recv(cx)?;
         let send_result = self.poll_send(cx)?;
 
@@ -223,18 +217,14 @@ impl Future for Driver {
                         stream_id,
                         bytes,
                         fin,
-                    } => {
-                        (
-                            stream_id,
-                            self.inner.connection.stream_send(stream_id, &bytes, fin),
-                        )
-                    }
-                    Message::Close(stream_id) => {
-                        (
-                            stream_id,
-                            self.inner.connection.stream_send(stream_id, &[], true),
-                        )
-                    }
+                    } => (
+                        stream_id,
+                        self.inner.connection.stream_send(stream_id, &bytes, fin),
+                    ),
+                    Message::Close(stream_id) => (
+                        stream_id,
+                        self.inner.connection.stream_send(stream_id, &[], true),
+                    ),
                 };
                 if let Err(err) = result {
                     let mut map = pollster::block_on(self.stream_map.lock());
@@ -353,10 +343,6 @@ impl QuicConnection {
         *next += 1;
         stream
     }
-
-    // pub fn upgrade(self, config: quiche::h3::Config) -> Http3Connection {
-    //     Http3Connection::new(self, config)
-    // }
 }
 
 // Readable/Writeable stream
@@ -365,6 +351,12 @@ pub struct QuicStream {
     id: u64,
     rx: UnboundedReceiver<Result<Message, quiche::Error>>,
     tx: UnboundedSender<Message>,
+}
+
+impl QuicStream {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 impl AsyncRead for QuicStream {
@@ -384,9 +376,7 @@ impl AsyncRead for QuicStream {
                     buf.set_filled(bytes.len());
                     Poll::Ready(Ok(()))
                 }
-                Ok(Message::Close(id)) => {
-                    Poll::Ready(Ok(()))
-                }
+                Ok(Message::Close(_id)) => Poll::Ready(Ok(())),
                 Err(err) => {
                     eprintln!("{err}");
                     Poll::Ready(Ok(()))
@@ -403,7 +393,7 @@ impl AsyncRead for QuicStream {
 impl AsyncWrite for QuicStream {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
         let message = Message::Data {
@@ -419,14 +409,14 @@ impl AsyncWrite for QuicStream {
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
         let message = Message::Close(self.id);
         match self.tx.send(message) {

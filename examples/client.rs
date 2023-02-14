@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect(socket, Some("localhost"))
         .await?;
     let mut stream = connection.open().await;
-    stream.write(b"PING").await?;
+    stream.write(b"GET /Cargo.toml").await?;
     let mut buf: [u8; 1024] = [0; 1024];
     let n = stream.read(&mut buf).await?;
     println!("{}", String::from_utf8_lossy(&buf[..n]));
