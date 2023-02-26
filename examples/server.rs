@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, sync::Arc};
 
 use tokio::net::UdpSocket;
 use tokio_quiche::{MAX_DATAGRAM_SIZE, QuicSocket};
@@ -20,7 +20,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     config.load_priv_key_from_pem_file("./localhost.key")?;
     config.load_cert_chain_from_pem_file("./localhost.crt")?;
 
-    let socket = UdpSocket::bind("127.0.0.1:4433").await?;
+    let io = Arc::new(UdpSocket::bind("127.0.0.1:4433").await?);
+    let socket = QuicSocket::new(config);
+
+    while let Ok(connection) = socket.accept(io, scid, odcid) {
+        
+    }
 
     Ok(())
 }

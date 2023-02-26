@@ -1,28 +1,13 @@
-use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, ready}, pin::Pin, time::Instant};
+use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, ready}, time::Instant};
 
 use quiche::Connection;
 use tokio::{sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}, Mutex}, io::ReadBuf, net::UdpSocket};
 
 use crate::{QuicStream, Message, STREAM_BUFFER_SIZE, util::Timer};
 
-pub struct Handshaker<'a>(pub &'a mut Inner);
+use super::Inner;
 
-impl<'a> Future for Handshaker<'a> {
-    type Output = io::Result<()>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        while !self.0.connection.is_established() {
-            if let Ok(opt) = ready!(self.0.poll_io_complete(cx)) {
-                if opt.is_none() && !self.0.connection.is_established() {
-                    return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
-                }
-            }
-        }
-        Poll::Ready(Ok(()))
-    }
-}
-
-pub struct Inner {
+pub struct ClientInner {
     pub io: UdpSocket,
     pub connection: Connection,
     pub send_flush: bool,
@@ -33,7 +18,8 @@ pub struct Inner {
     pub timer: Timer,
 }
 
-impl Inner {
+impl Inner for ClientInner {
+
     fn poll_io_complete(
         &mut self,
         cx: &mut std::task::Context<'_>,
@@ -57,6 +43,13 @@ impl Inner {
             (..) => Poll::Ready(Ok(Some(()))),
         }
     }
+
+    fn connection(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
+}
+
+impl ClientInner {
 
     fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
         if self.send_flush {
@@ -118,8 +111,8 @@ impl Inner {
 }
 
 // Backend Driver
-pub struct Driver {
-    pub inner: Inner,
+pub struct ClientDriver {
+    pub inner: Box<dyn Inner + 'static>,
     pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>,
     pub stream_next: Arc<Mutex<u64>>,
     pub message_recv: UnboundedReceiver<Message>,
@@ -127,7 +120,7 @@ pub struct Driver {
     pub incoming_send: UnboundedSender<QuicStream>,
 }
 
-impl Future for Driver {
+impl Future for ClientDriver {
     type Output = Result<(), io::Error>;
 
     fn poll(
@@ -145,11 +138,11 @@ impl Future for Driver {
                         fin,
                     } => (
                         stream_id,
-                        self.inner.connection.stream_send(stream_id, &bytes, fin),
+                        self.inner.connection().stream_send(stream_id, &bytes, fin),
                     ),
                     Message::Close(stream_id) => (
                         stream_id,
-                        self.inner.connection.stream_send(stream_id, &[], true),
+                        self.inner.connection().stream_send(stream_id, &[], true),
                     ),
                 };
                 if let Err(err) = result {
@@ -160,8 +153,8 @@ impl Future for Driver {
                 }
             }
             // Read Connection
-            for stream_id in self.inner.connection.readable() {
-                if self.inner.connection.stream_finished(stream_id) {
+            for stream_id in self.inner.connection().readable() {
+                if self.inner.connection().stream_finished(stream_id) {
                     continue;
                 }
                 let incoming_send = self.incoming_send.clone();
@@ -188,7 +181,7 @@ impl Future for Driver {
 
                 match self
                     .inner
-                    .connection
+                    .connection()
                     .stream_recv(stream_id, &mut stream_buf)
                 {
                     Ok((len, fin)) => {

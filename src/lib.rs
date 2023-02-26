@@ -1,6 +1,4 @@
-// TODO: The UdpSocket that inner uses needs to be sharable somehow...
-
-use backend::{Driver, Inner, Handshaker};
+use backend::{client::{ClientDriver, ClientInner, self}, Inner, Handshaker, server::{ServerInner, self, ServerDriver}};
 use quiche::{ConnectionId};
 use rand::Rng;
 use std::{
@@ -16,12 +14,11 @@ use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
         Mutex,
-    },
+    }, task::JoinHandle,
 };
 use util::Timer;
 
 mod util;
-mod server;
 mod backend;
 
 pub const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -63,7 +60,7 @@ impl QuicSocket {
             &mut self.config,
         )?;
 
-        let mut inner = Inner {
+        let mut inner = ClientInner {
             io,
             connection,
             send_flush: false,
@@ -77,12 +74,12 @@ impl QuicSocket {
         let handshake = Handshaker(&mut inner);
         handshake.await?;
 
-        Ok(QuicConnection::new(inner, false))
+        Ok(QuicConnection::new(Box::new(inner), false))
     }
 
     pub async fn accept(
         &mut self,
-        io: UdpSocket,
+        io: Arc<UdpSocket>,
         scid: &ConnectionId<'_>,
         odcid: Option<&ConnectionId<'_>>,
     ) -> Result<QuicConnection, Box<dyn Error>> {
@@ -93,7 +90,7 @@ impl QuicSocket {
             &mut self.config,
         )?;
 
-        let mut inner = Inner {
+        let mut inner = ServerInner {
             io,
             connection,
             send_flush: false,
@@ -107,12 +104,13 @@ impl QuicSocket {
         let handshake = Handshaker(&mut inner);
         handshake.await?;
 
-        Ok(QuicConnection::new(inner, true))
+        Ok(QuicConnection::new(Box::new(inner), true))
     }
 }
 
 // Handle multiple streams
 pub struct QuicConnection {
+    handle: JoinHandle<Result<(), io::Error>>,
     is_server: bool,
     stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>, // Map each stream to a `Sender`
     stream_next: Arc<Mutex<u64>>,           // Next available stream id
@@ -121,25 +119,35 @@ pub struct QuicConnection {
 }
 
 impl QuicConnection {
-    fn new(inner: Inner, is_server: bool) -> Self {
+    fn new(inner: Box<dyn Inner + 'static>, is_server: bool) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
         let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let stream_next = Arc::new(Mutex::new(1));
         let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
 
-        let driver = Driver {
-            inner,
-            stream_map: stream_map.clone(),
-            stream_next: stream_next.clone(),
-            message_recv,
-            message_send: message_send.clone(),
-            incoming_send,
+        let handle = if is_server {
+            tokio::spawn(ClientDriver {
+                inner,
+                stream_map: stream_map.clone(),
+                stream_next: stream_next.clone(),
+                message_recv,
+                message_send: message_send.clone(),
+                incoming_send,
+            })
+        } else {
+            tokio::spawn(ServerDriver {
+                inner,
+                stream_map: stream_map.clone(),
+                stream_next: stream_next.clone(),
+                message_recv,
+                message_send: message_send.clone(),
+                incoming_send,
+            })
         };
 
-        tokio::spawn(driver);
-
         Self {
+            handle,
             is_server,
             stream_map,
             stream_next,

@@ -13,6 +13,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-timer = "^0.2.13"
 quiche = "^0.16.0"
 pollster = "^0.3.0"
+rust-crypto = "^0.2"
+chrono = "^0.4.23"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
