@@ -1,26 +1,14 @@
-use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, ready}, time::Instant};
+use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, ready}, time::Instant, pin::Pin};
 
 use quiche::Connection;
 use tokio::{sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}, Mutex}, io::ReadBuf, net::UdpSocket};
 
 use crate::{QuicStream, Message, STREAM_BUFFER_SIZE, util::Timer};
 
-use super::Inner;
+use super::{Inner, Client, Driver};
 
-pub struct ClientInner {
-    pub io: UdpSocket,
-    pub connection: Connection,
-    pub send_flush: bool,
-    pub send_end: usize,
-    pub send_pos: usize,
-    pub recv_buf: Vec<u8>,
-    pub send_buf: Vec<u8>,
-    pub timer: Timer,
-}
-
-impl Inner for ClientInner {
-
-    fn poll_io_complete(
+impl Inner<Client> {
+    pub fn poll_io_complete(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<Option<()>, io::Error>> {
@@ -43,13 +31,6 @@ impl Inner for ClientInner {
             (..) => Poll::Ready(Ok(Some(()))),
         }
     }
-
-    fn connection(&mut self) -> &mut Connection {
-        &mut self.connection
-    }
-}
-
-impl ClientInner {
 
     fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
         if self.send_flush {
@@ -111,16 +92,7 @@ impl ClientInner {
 }
 
 // Backend Driver
-pub struct ClientDriver {
-    pub inner: Box<dyn Inner + 'static>,
-    pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>,
-    pub stream_next: Arc<Mutex<u64>>,
-    pub message_recv: UnboundedReceiver<Message>,
-    pub message_send: UnboundedSender<Message>,
-    pub incoming_send: UnboundedSender<QuicStream>,
-}
-
-impl Future for ClientDriver {
+impl Future for Driver<Client> {
     type Output = Result<(), io::Error>;
 
     fn poll(
@@ -138,11 +110,11 @@ impl Future for ClientDriver {
                         fin,
                     } => (
                         stream_id,
-                        self.inner.connection().stream_send(stream_id, &bytes, fin),
+                        self.inner.connection.stream_send(stream_id, &bytes, fin),
                     ),
                     Message::Close(stream_id) => (
                         stream_id,
-                        self.inner.connection().stream_send(stream_id, &[], true),
+                        self.inner.connection.stream_send(stream_id, &[], true),
                     ),
                 };
                 if let Err(err) = result {
@@ -153,8 +125,8 @@ impl Future for ClientDriver {
                 }
             }
             // Read Connection
-            for stream_id in self.inner.connection().readable() {
-                if self.inner.connection().stream_finished(stream_id) {
+            for stream_id in self.inner.connection.readable() {
+                if self.inner.connection.stream_finished(stream_id) {
                     continue;
                 }
                 let incoming_send = self.incoming_send.clone();
@@ -181,7 +153,7 @@ impl Future for ClientDriver {
 
                 match self
                     .inner
-                    .connection()
+                    .connection
                     .stream_recv(stream_id, &mut stream_buf)
                 {
                     Ok((len, fin)) => {

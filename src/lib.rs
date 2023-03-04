@@ -1,4 +1,4 @@
-use backend::{client::{ClientDriver, ClientInner, self}, Inner, Handshaker, server::{ServerInner, self, ServerDriver}};
+use backend::{client::{self}, server::{self}, Inner, Client, Server, Driver, Backend, Handshaker};
 use quiche::{ConnectionId};
 use rand::Rng;
 use std::{
@@ -6,7 +6,7 @@ use std::{
     error::Error,
     io,
     sync::Arc,
-    task::{Poll},
+    task::{Poll}, marker::PhantomData, future::Future,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -48,7 +48,7 @@ impl QuicSocket {
         &mut self,
         io: UdpSocket,
         server_name: Option<&str>,
-    ) -> Result<QuicConnection, Box<dyn Error>> {
+    ) -> Result<QuicConnection<Client>, Box<dyn Error>> {
         let mut scid = vec![0; 16];
         rand::thread_rng().fill(&mut *scid);
         let scid: ConnectionId = scid.into();
@@ -60,21 +60,20 @@ impl QuicSocket {
             &mut self.config,
         )?;
 
-        let mut inner = ClientInner {
-            io,
+        let mut inner = Inner::new::<Client>(
+            Arc::new(io),
             connection,
-            send_flush: false,
-            send_end: 0,
-            send_pos: 0,
-            recv_buf: vec![0; STREAM_BUFFER_SIZE],
-            send_buf: vec![0; MAX_DATAGRAM_SIZE],
-            timer: Timer::Unset,
-        };
+            false,
+            0,
+            0,
+            vec![0; STREAM_BUFFER_SIZE],
+            vec![0; MAX_DATAGRAM_SIZE],
+            Timer::Unset,
+        );
 
-        let handshake = Handshaker(&mut inner);
-        handshake.await?;
+        Handshaker(&mut inner).await?;
 
-        Ok(QuicConnection::new(Box::new(inner), false))
+        Ok(QuicConnection::new(inner))
     }
 
     pub async fn accept(
@@ -82,7 +81,7 @@ impl QuicSocket {
         io: Arc<UdpSocket>,
         scid: &ConnectionId<'_>,
         odcid: Option<&ConnectionId<'_>>,
-    ) -> Result<QuicConnection, Box<dyn Error>> {
+    ) -> Result<QuicConnection<Server>, Box<dyn Error>> {
         let connection = quiche::accept(
             &scid, odcid,
             io.local_addr()?,
@@ -90,69 +89,58 @@ impl QuicSocket {
             &mut self.config,
         )?;
 
-        let mut inner = ServerInner {
+        let mut inner = Inner::new::<Server>(
             io,
             connection,
-            send_flush: false,
-            send_end: 0,
-            send_pos: 0,
-            recv_buf: vec![0; STREAM_BUFFER_SIZE],
-            send_buf: vec![0; MAX_DATAGRAM_SIZE],
-            timer: Timer::Unset,
-        };
+            false,
+            0,
+            0,
+            vec![0; STREAM_BUFFER_SIZE],
+            vec![0; MAX_DATAGRAM_SIZE],
+            Timer::Unset,
+        );
 
-        let handshake = Handshaker(&mut inner);
-        handshake.await?;
+        Handshaker(&mut inner).await?;
 
-        Ok(QuicConnection::new(Box::new(inner), true))
+        Ok(QuicConnection::new(inner))
     }
 }
 
 // Handle multiple streams
-pub struct QuicConnection {
+pub struct QuicConnection<T: Backend + Send> {
     handle: JoinHandle<Result<(), io::Error>>,
-    is_server: bool,
     stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>, // Map each stream to a `Sender`
     stream_next: Arc<Mutex<u64>>,           // Next available stream id
     message_send: UnboundedSender<Message>, // This is passed to each stream.
     incoming_recv: UnboundedReceiver<QuicStream>,
+    state: PhantomData<T>
 }
 
-impl QuicConnection {
-    fn new(inner: Box<dyn Inner + 'static>, is_server: bool) -> Self {
+impl<T: Backend + Send + 'static> QuicConnection<T> where Driver<T>: Future<Output = Result<(), io::Error>> {
+    fn new(inner: Inner<T>) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
         let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let stream_next = Arc::new(Mutex::new(1));
         let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
 
-        let handle = if is_server {
-            tokio::spawn(ClientDriver {
-                inner,
-                stream_map: stream_map.clone(),
-                stream_next: stream_next.clone(),
-                message_recv,
-                message_send: message_send.clone(),
-                incoming_send,
-            })
-        } else {
-            tokio::spawn(ServerDriver {
-                inner,
-                stream_map: stream_map.clone(),
-                stream_next: stream_next.clone(),
-                message_recv,
-                message_send: message_send.clone(),
-                incoming_send,
-            })
+        let driver = Driver {
+            inner,
+            stream_map: stream_map.clone(),
+            stream_next: stream_next.clone(),
+            message_recv,
+            message_send: message_send.clone(),
+            incoming_send,
         };
+        let handle = tokio::spawn(driver);
 
         Self {
             handle,
-            is_server,
             stream_map,
             stream_next,
             message_send,
             incoming_recv,
+            state: PhantomData,
         }
     }
 
@@ -160,11 +148,30 @@ impl QuicConnection {
     pub async fn incoming(&mut self) -> Option<QuicStream> {
         self.incoming_recv.recv().await
     }
+}
 
+impl QuicConnection<Client> {
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2 + if self.is_server { 1 } else { 0 };
+        let id = *next << 2 + 1;
+        let stream = QuicStream {
+            id,
+            rx,
+            tx: self.message_send.clone(),
+        };
+        let mut map = self.stream_map.lock().await;
+        map.insert(id, tx);
+        *next += 1;
+        stream
+    }
+}
+
+impl QuicConnection<Server> {
+    pub async fn open(&mut self) -> QuicStream {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut next = self.stream_next.lock().await;
+        let id = *next << 2;
         let stream = QuicStream {
             id,
             rx,
