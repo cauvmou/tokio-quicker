@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{io};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -6,7 +6,7 @@ use tokio::{
 use tokio_quiche::{QuicSocket};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), io::Error> {
 
     let mut connection = QuicSocket::bind("127.0.0.1:0").await?
         .connect(Some("localhost"), "127.0.0.1:4433")
