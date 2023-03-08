@@ -3,7 +3,7 @@ use std::{io};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
-use tokio_quiche::{QuicSocket};
+use tokio_quic::{QuicSocket};
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {

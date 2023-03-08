@@ -1,7 +1,7 @@
 use std::{io, fs};
 
 use tokio::{io::{AsyncWriteExt, AsyncReadExt}};
-use tokio_quiche::{QuicListener};
+use tokio_quic::{QuicListener};
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
