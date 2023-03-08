@@ -1,7 +1,7 @@
 [package]
-name = "tokio-quiche"
+name = "tokio-quic"
 version = "0.2.0"
-authors = ["quininer <quininer@live.com>", "cauvmou <cauvmou.8855@gmail.com>"]
+authors = ["cauvmou <cauvmou.8855@gmail.com>", "quininer <quininer@live.com>"]
 edition = "2021"
 
 [dependencies]
