@@ -3,11 +3,63 @@ use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, read
 use quiche::Connection;
 use tokio::{sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}, Mutex}, io::ReadBuf, net::UdpSocket};
 
-use crate::{QuicStream, Message, STREAM_BUFFER_SIZE, util::Timer};
+use crate::{STREAM_BUFFER_SIZE, Message, stream::QuicStream};
 
-use super::{Inner, Client, Driver};
+use super::timer::Timer;
 
-impl Inner<Client> {
+pub struct Handshaker<'a>(pub &'a mut Inner);
+
+impl<'a> Future for Handshaker<'a> {
+    type Output = io::Result<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        while !self.0.connection.is_established() {
+            if let Ok(opt) = ready!(self.0.poll_io_complete(cx)) {
+                if opt.is_none() && !self.0.connection.is_established() {
+                    return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
+                }
+            }
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
+pub struct Inner {
+    pub io: Arc<UdpSocket>,
+    pub connection: Connection,
+    pub send_flush: bool,
+    pub send_end: usize,
+    pub send_pos: usize,
+    pub recv_buf: Vec<u8>,
+    pub send_buf: Vec<u8>,
+    pub timer: Timer,
+}
+
+impl Inner {
+    pub fn new(
+        io: Arc<UdpSocket>,
+        connection: Connection,
+        send_flush: bool,
+        send_end: usize,
+        send_pos: usize,
+        recv_buf: Vec<u8>,
+        send_buf: Vec<u8>,
+        timer: Timer
+    ) -> Self {
+        Self {
+            io,
+            connection,
+            send_flush,
+            send_end,
+            send_pos,
+            recv_buf,
+            send_buf,
+            timer,
+        }
+    }
+}
+
+impl Inner {
     pub fn poll_io_complete(
         &mut self,
         cx: &mut std::task::Context<'_>,
@@ -91,8 +143,17 @@ impl Inner<Client> {
     }
 }
 
+pub struct Driver {
+    pub inner: Inner,
+    pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>,
+    pub stream_next: Arc<Mutex<u64>>,
+    pub message_recv: UnboundedReceiver<Message>,
+    pub message_send: UnboundedSender<Message>,
+    pub incoming_send: UnboundedSender<QuicStream>,
+}
+
 // Backend Driver
-impl Future for Driver<Client> {
+impl Future for Driver {
     type Output = Result<(), io::Error>;
 
     fn poll(

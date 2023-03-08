@@ -18,3 +18,4 @@ chrono = "^0.4.23"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+simple_logger = "*"

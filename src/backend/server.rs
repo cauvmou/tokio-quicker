@@ -1,21 +1,84 @@
-/*
- 1. On creation generate a new ConnectionID seed.
- 2. For each incoming connection check if the data contains a QUIC-Header and extract the ConnectionID.
-    Check if we already have this ConnectionID in our CLIENT-MAP and continue, else verify that the packet is a initial and check the version (Version negotiation).
-    Then we get the Token from the header, if this is empty we initiate a retry. For this we need to mint a retry-token and send it to the client.
-    But if the token is something we need to verify it.
- 3. If all checks out we add the connection to our CLIENT-MAP and use the ConnectionID as a key
-*/
-use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, ready}, time::Instant, pin::Pin};
+use std::{
+    collections::HashMap,
+    future::Future,
+    io,
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Poll},
+    time::Instant, net::SocketAddr,
+};
 
+use log::{error};
 use quiche::Connection;
-use tokio::{sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}, Mutex}, io::ReadBuf, net::UdpSocket};
+use tokio::{
+    net::UdpSocket,
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Mutex,
+    },
+};
 
-use crate::{QuicStream, Message, STREAM_BUFFER_SIZE, util::Timer};
+use crate::{stream::QuicStream, Message, STREAM_BUFFER_SIZE};
 
-use super::{Inner, Server, Driver};
+use super::{timer::Timer, manager::Datapacket};
 
-impl Inner<Server> {
+pub struct Handshaker<'a>(pub &'a mut Inner);
+
+impl<'a> Future for Handshaker<'a> {
+    type Output = io::Result<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        while !self.0.connection.is_established() {
+            if let Ok(opt) = ready!(self.0.poll_io_complete(cx)) {
+                if opt.is_none() && !self.0.connection.is_established() {
+                    return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
+                }
+            }
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
+pub struct Inner {
+    pub io: Arc<UdpSocket>,
+    pub connection: quiche::Connection,
+    pub data_recv: UnboundedReceiver<Datapacket>,
+    pub send_flush: bool,
+    pub send_end: usize,
+    pub send_pos: usize,
+    pub recv_buf: Vec<u8>,
+    pub send_buf: Vec<u8>,
+    pub timer: Timer,
+    last_address: Option<SocketAddr>
+}
+
+impl Inner {
+    pub fn new(
+        io: Arc<UdpSocket>,
+        connection: Connection,
+        data_recv: UnboundedReceiver<Datapacket>,
+        send_flush: bool,
+        send_end: usize,
+        send_pos: usize,
+        recv_buf: Vec<u8>,
+        send_buf: Vec<u8>,
+        timer: Timer,
+    ) -> Self {
+        Self {
+            io,
+            connection,
+            data_recv,
+            send_flush,
+            send_end,
+            send_pos,
+            recv_buf,
+            send_buf,
+            timer,
+            last_address: None,
+        }
+    }
+
+    // TODO: THIS SHIT IS HELLA SUS NO CAP FRFR
     pub fn poll_io_complete(
         &mut self,
         cx: &mut std::task::Context<'_>,
@@ -41,9 +104,13 @@ impl Inner<Server> {
     }
 
     fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
+        if self.last_address.is_none() {
+            return Poll::Pending;
+        }
+
         if self.send_flush {
             while self.send_pos != self.send_end {
-                let n = ready!(self.io.poll_send(cx, &mut self.send_buf[self.send_pos..]))?;
+                let n = ready!(self.io.poll_send_to(cx, &mut self.send_buf[self.send_pos..], self.last_address.unwrap()))?;
                 self.send_pos += n;
             }
 
@@ -64,6 +131,7 @@ impl Inner<Server> {
                 return Poll::Ready(Ok(()));
             }
             Err(err) => {
+                error!("Closing connection: {:?}", err);
                 self.connection
                     .close(false, to_wire(err), b"fail")
                     .map_err(to_io_error)?;
@@ -73,20 +141,20 @@ impl Inner<Server> {
 
         let n = ready!(self
             .io
-            .poll_send(cx, &mut self.send_buf[self.send_pos..self.send_end]))?;
+            .poll_send_to(cx, &mut self.send_buf[self.send_pos..self.send_end], self.last_address.unwrap()))?;
         self.send_pos += n;
 
         Poll::Ready(Ok(()))
     }
 
     fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
-        let buf = &mut ReadBuf::new(&mut self.recv_buf);
-        let from = ready!(self.io.poll_recv_from(cx, buf))?;
+        let Datapacket { from, mut data } = ready!(self.data_recv.poll_recv(cx)).unwrap();
         let info = quiche::RecvInfo {
             from,
             to: self.io.local_addr()?,
         };
-        match self.connection.recv(buf.filled_mut(), info) {
+        self.last_address = Some(from);
+        match self.connection.recv(&mut data, info) {
             Ok(_) => Poll::Ready(Ok(())),
             Err(quiche::Error::Done) => Poll::Ready(Ok(())),
             Err(err) => {
@@ -99,8 +167,17 @@ impl Inner<Server> {
     }
 }
 
+pub struct Driver {
+    pub inner: Inner,
+    pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>,
+    pub stream_next: Arc<Mutex<u64>>,
+    pub message_recv: UnboundedReceiver<Message>,
+    pub message_send: UnboundedSender<Message>,
+    pub incoming_send: UnboundedSender<QuicStream>,
+}
+
 // Backend Driver
-impl Future for Driver<Server> {
+impl Future for Driver {
     type Output = Result<(), io::Error>;
 
     fn poll(
