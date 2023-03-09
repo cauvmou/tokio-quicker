@@ -6,6 +6,8 @@ use tokio_quic::{QuicListener};
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
 
+    //simple_logger::SimpleLogger::new().init();
+
     let mut listener = QuicListener::bind("127.0.0.1:4433").await?;
 
     while let Ok(mut connection) = listener.accept().await {
