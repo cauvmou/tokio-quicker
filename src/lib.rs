@@ -1,3 +1,39 @@
+//! Async QUIC Listener/Socket for [tokio](https://tokio.rs/) using [quiche](https://github.com/cloudflare/quiche).
+//!
+//! ### Examples
+//!
+//! #### [Client](https://github.com/cauvmou/tokio-quic/blob/main/examples/client.rs)
+//!
+//! First create a `QuicSocket`.
+//! ```rs
+//! let mut connection: QuicConnection<Client> = QuicSocket::bind("127.0.0.1:0").await?
+//!         .connect(Some("localhost"), "127.0.0.1:4433").await?;
+//! ```
+//! Then you can start opening new `QuicStream`s or receive incoming ones from the server.
+//! ```rs
+//! let mut stream: QuicStream = connection.open().await;
+//! ```
+//! ```rs
+//! let mut stream: QuicStream = connection.incoming().await.unwrap();
+//! ```
+//! These implement the tokio `AsyncRead` and `AsyncWrite` traits.
+//!
+//! #### [Server](https://github.com/cauvmou/tokio-quic/blob/main/examples/server.rs)
+//!
+//! Again create a `QuicListener`.
+//!
+//! ```rs
+//! let mut listener: QuicListener = QuicListener::bind("127.0.0.1:4433").await?;
+//! ```
+//! Then you can use a while loop to accept incoming connection and either handle them directly on the thread or move them to a new one.
+//! ```rs
+//! while let Ok(mut connection: QuicConnection<Server>) = listener.accept().await {
+//!     tokio::spawn(async move {
+//!         ...
+//!     });
+//! }
+//! ```
+
 use std::{io, sync::Arc};
 
 use backend::{
@@ -33,6 +69,13 @@ pub enum Message {
     Close(u64),
 }
 
+/// `QuicListener` is used to bind to a specified address/port.
+///
+/// It can be configured using a `quiche::Config` struct.
+/// A base config can be obtained from `tokio_quic::config::default()`.
+///
+/// If the feature `key-gen` is enabled this config will already come with a certificate and private key,
+/// although these are just for testing and are not recommended to be used in production.
 pub struct QuicListener {
     io: Arc<UdpSocket>,
     #[allow(unused)]
@@ -80,6 +123,7 @@ impl QuicListener {
         })
     }
 
+    /// Accepts a incoming connection.
     pub async fn accept(&mut self) -> Result<QuicConnection<Server>, io::Error> {
         let manager::Client { connection, recv } = self.connection_recv.recv().await.unwrap();
 
@@ -101,6 +145,13 @@ impl QuicListener {
     }
 }
 
+/// `QuicSocket` opens a connection from a specified address/port to a server.
+///
+/// It can be configured using a `quiche::Config` struct.
+/// A base config can be obtained from `tokio_quic::config::default()`.
+///
+/// If the feature `key-gen` is enabled this config will already come with a certificate and private key,
+/// although these are just for testing and are not recommended to be used in production.
 pub struct QuicSocket {
     io: Arc<UdpSocket>,
     config: quiche::Config,
@@ -108,6 +159,7 @@ pub struct QuicSocket {
 
 impl QuicSocket {
     #[cfg(not(feature = "key-gen"))]
+    /// Bind to a specified address.
     pub async fn bind<A: ToSocketAddrs>(
         addr: A,
         key_pem: &str,
@@ -120,10 +172,12 @@ impl QuicSocket {
     }
 
     #[cfg(feature = "key-gen")]
+    /// Bind to a specified address.
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         Self::bind_with_config(addr, config::default()).await
     }
 
+    /// Bind to a specified address with a `quiche::Config`.
     pub async fn bind_with_config<A: ToSocketAddrs>(
         addr: A,
         config: quiche::Config,
@@ -134,6 +188,10 @@ impl QuicSocket {
         })
     }
 
+    /// Connect to a remote server.
+    ///
+    /// `server_name` needs to have a value in order to validate the server's certificate.
+    /// Can be set to `None`, if validation is turned off.
     pub async fn connect<A: ToSocketAddrs>(
         &mut self,
         server_name: Option<&str>,

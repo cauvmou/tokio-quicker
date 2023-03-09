@@ -13,7 +13,7 @@ use rand::RngCore;
 ///      2. Generate Random bytes.
 ///      3. Encrypt the the `Vec<u8>` from step 1 with those random bytes and the servers encryption secret.
 ///      4. Append the random bytes at the end of the newly encrypted `Vec<u8>`.
-pub fn mint_token(header: &Header, src: &SocketAddr, token_secret: &Vec<u8>) -> Vec<u8> {
+pub(crate) fn mint_token(header: &Header, src: &SocketAddr, token_secret: &Vec<u8>) -> Vec<u8> {
     let octets = match src.ip() {
         std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
         std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
@@ -33,7 +33,7 @@ pub fn mint_token(header: &Header, src: &SocketAddr, token_secret: &Vec<u8>) -> 
 }
 
 /// Do the steps that were listed above the `mint_token` function but in reverse.
-pub fn validate_token<'a>(
+pub(crate) fn validate_token<'a>(
     token: &Vec<u8>,
     src: &SocketAddr,
     token_secret: &Vec<u8>,

@@ -20,7 +20,17 @@ impl Backend for Client {}
 pub struct Server;
 impl Backend for Server {}
 
-// Handle multiple streams
+/// A `QuicConnection` represents a connection to a remote host.
+///
+/// ```rs
+/// connection.open().await;
+/// ```
+/// Is used to open a new bidi stream.
+///
+/// ```rs
+/// connection.incoming().await.unwrap();
+/// ```
+/// Waits for an incoming stream from remote.
 pub struct QuicConnection<T: Backend + Send> {
     #[allow(unused)]
     handle: JoinHandle<Result<(), io::Error>>,
@@ -32,7 +42,7 @@ pub struct QuicConnection<T: Backend + Send> {
 }
 
 impl QuicConnection<Server> {
-    pub fn new(inner: server::Inner) -> Self {
+    pub(crate) fn new(inner: server::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
         let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -59,6 +69,7 @@ impl QuicConnection<Server> {
         }
     }
 
+    /// Opens a new bidi stream to the remote.
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
@@ -75,13 +86,14 @@ impl QuicConnection<Server> {
     }
 
     #[inline]
+    /// Return `None` if the driver is has closed the stream
     pub async fn incoming(&mut self) -> Option<QuicStream> {
         self.incoming_recv.recv().await
     }
 }
 
 impl QuicConnection<Client> {
-    pub fn new(inner: client::Inner) -> Self {
+    pub(crate) fn new(inner: client::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
         let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -109,10 +121,12 @@ impl QuicConnection<Client> {
     }
 
     #[inline]
+    /// Return `None` if the driver is has closed the stream
     pub async fn incoming(&mut self) -> Option<QuicStream> {
         self.incoming_recv.recv().await
     }
 
+    /// Opens a new bidi stream to the remote.
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;

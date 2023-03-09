@@ -7,8 +7,10 @@ use tokio::{
 
 use crate::Message;
 
-// Readable/Writeable stream
 #[derive(Debug)]
+/// Implements the `AsyncRead` and `AsyncWrite` traits.
+///
+/// Shutdown permanently closes the quic stream.
 pub struct QuicStream {
     pub(crate) id: u64,
     pub(crate) rx: UnboundedReceiver<Result<Message, quiche::Error>>,
