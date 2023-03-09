@@ -2,6 +2,14 @@
 
 Async QUIC Listener/Socket for [tokio](https://tokio.rs/) using [quiche](https://github.com/cloudflare/quiche).
 
+## Roadmap
+
+- [x] QuicListener for server use.
+- [x] QuicSocket for client use.
+- [x] Boringssl key generation (Can be disabled by disabling the default features).
+- [ ] Swappable backend (quiche & quinn) for boringssl and openssl support.
+- [ ] Unified config for both implementations.
+
 ## Examples
 
 ### Client

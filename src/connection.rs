@@ -1,8 +1,18 @@
-use std::{io, sync::Arc, collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, io, marker::PhantomData, sync::Arc};
 
-use tokio::{task::JoinHandle, sync::{Mutex, mpsc::{UnboundedSender, UnboundedReceiver, self}}};
+use tokio::{
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Mutex,
+    },
+    task::JoinHandle,
+};
 
-use crate::{backend::{server, client}, Message, stream::QuicStream};
+use crate::{
+    backend::{client, server},
+    stream::QuicStream,
+    Message,
+};
 
 pub trait Backend {}
 pub struct Client;
@@ -12,12 +22,13 @@ impl Backend for Server {}
 
 // Handle multiple streams
 pub struct QuicConnection<T: Backend + Send> {
+    #[allow(unused)]
     handle: JoinHandle<Result<(), io::Error>>,
     stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>, // Map each stream to a `Sender`
     stream_next: Arc<Mutex<u64>>,           // Next available stream id
     message_send: UnboundedSender<Message>, // This is passed to each stream.
     incoming_recv: UnboundedReceiver<QuicStream>,
-    state: PhantomData<T>
+    state: PhantomData<T>,
 }
 
 impl QuicConnection<Server> {

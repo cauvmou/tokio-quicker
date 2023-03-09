@@ -1,18 +1,27 @@
 use std::{io, sync::Arc};
 
-use backend::{manager::{Manager, self}, timer::Timer, server, client};
-use config::{STREAM_BUFFER_SIZE, MAX_DATAGRAM_SIZE};
-use connection::{QuicConnection, Server, Client};
+use backend::{
+    client,
+    manager::{self, Manager},
+    server,
+    timer::Timer,
+};
+use config::{MAX_DATAGRAM_SIZE, STREAM_BUFFER_SIZE};
+use connection::{Client, QuicConnection, Server};
 use quiche::ConnectionId;
 use rand::Rng;
 use ring::rand::SystemRandom;
-use tokio::{net::{ToSocketAddrs, UdpSocket}, sync::mpsc::{self, UnboundedReceiver}, task::JoinHandle};
+use tokio::{
+    net::{ToSocketAddrs, UdpSocket},
+    sync::mpsc::{self, UnboundedReceiver},
+    task::JoinHandle,
+};
 
 mod backend;
+pub mod config;
+mod connection;
 mod crypto;
 mod stream;
-mod connection;
-pub mod config;
 
 #[derive(Debug)]
 pub enum Message {
@@ -26,13 +35,18 @@ pub enum Message {
 
 pub struct QuicListener {
     io: Arc<UdpSocket>,
+    #[allow(unused)]
     handle: JoinHandle<Result<(), io::Error>>,
     connection_recv: UnboundedReceiver<manager::Client>,
 }
 
 impl QuicListener {
     #[cfg(not(feature = "key-gen"))]
-    pub async fn bind<A: ToSocketAddrs>(addr: A, key_pem: &str, cert_pem: &str) -> Result<Self, io::Error> {
+    pub async fn bind<A: ToSocketAddrs>(
+        addr: A,
+        key_pem: &str,
+        cert_pem: &str,
+    ) -> Result<Self, io::Error> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
         config.load_cert_chain_from_pem_file(cert_pem).unwrap();
@@ -44,7 +58,10 @@ impl QuicListener {
         Self::bind_with_config(addr, config::default()).await
     }
 
-    pub async fn bind_with_config<A: ToSocketAddrs>(addr: A, config: quiche::Config) -> Result<Self, io::Error> {
+    pub async fn bind_with_config<A: ToSocketAddrs>(
+        addr: A,
+        config: quiche::Config,
+    ) -> Result<Self, io::Error> {
         let io = Arc::new(UdpSocket::bind(addr).await?);
         let rng = SystemRandom::new();
         let (tx, connection_recv) = mpsc::unbounded_channel();
@@ -53,7 +70,7 @@ impl QuicListener {
             ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap(),
             b"This is a super secret token!".to_vec(),
             config,
-            tx
+            tx,
         );
         let handle = tokio::spawn(manager);
         Ok(Self {
@@ -91,7 +108,11 @@ pub struct QuicSocket {
 
 impl QuicSocket {
     #[cfg(not(feature = "key-gen"))]
-    pub async fn bind<A: ToSocketAddrs>(addr: A, key_pem: &str, cert_pem: &str) -> Result<Self, io::Error> {
+    pub async fn bind<A: ToSocketAddrs>(
+        addr: A,
+        key_pem: &str,
+        cert_pem: &str,
+    ) -> Result<Self, io::Error> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
         config.load_cert_chain_from_pem_file(cert_pem).unwrap();
@@ -103,10 +124,13 @@ impl QuicSocket {
         Self::bind_with_config(addr, config::default()).await
     }
 
-    pub async fn bind_with_config<A: ToSocketAddrs>(addr: A, config: quiche::Config) -> Result<Self, io::Error> {
+    pub async fn bind_with_config<A: ToSocketAddrs>(
+        addr: A,
+        config: quiche::Config,
+    ) -> Result<Self, io::Error> {
         Ok(Self {
             io: Arc::new(UdpSocket::bind(addr).await?),
-            config
+            config,
         })
     }
 
@@ -125,7 +149,8 @@ impl QuicSocket {
             self.io.local_addr()?,
             self.io.peer_addr()?,
             &mut self.config,
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut inner = client::Inner::new(
             self.io.clone(),

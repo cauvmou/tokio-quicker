@@ -1,11 +1,10 @@
-use std::{io, fs};
+use std::{fs, io};
 
-use tokio::{io::{AsyncWriteExt, AsyncReadExt}};
-use tokio_quic::{QuicListener};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_quic::QuicListener;
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
-
     //simple_logger::SimpleLogger::new().init();
 
     let mut listener = QuicListener::bind("127.0.0.1:4433").await?;

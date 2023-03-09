@@ -1,9 +1,13 @@
-use std::{collections::HashMap, future::Future, io, sync::Arc, task::ready, net::SocketAddr};
+use std::{collections::HashMap, future::Future, io, net::SocketAddr, sync::Arc, task::ready};
 
-use log::{error, warn, info};
+use log::{error, info, warn};
 use quiche::ConnectionId;
 use ring::hmac::Key;
-use tokio::{io::ReadBuf, net::{UdpSocket}, sync::mpsc::{UnboundedSender, UnboundedReceiver, self}};
+use tokio::{
+    io::ReadBuf,
+    net::UdpSocket,
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+};
 
 use crate::{
     crypto::{mint_token, validate_token},
@@ -12,12 +16,12 @@ use crate::{
 
 pub struct Client {
     pub connection: quiche::Connection,
-    pub recv: UnboundedReceiver<Datapacket>
+    pub recv: UnboundedReceiver<Datapacket>,
 }
 
 pub struct Datapacket {
     pub from: SocketAddr,
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
 }
 
 pub struct Manager {
@@ -35,7 +39,7 @@ impl Manager {
         seed: Key,
         secret_sauce: Vec<u8>,
         config: quiche::Config,
-        connection_send: UnboundedSender<Client>
+        connection_send: UnboundedSender<Client>,
     ) -> Self {
         info!("NEW MANAGER");
         Self {
@@ -44,7 +48,7 @@ impl Manager {
             seed,
             secret_sauce,
             config,
-            connection_send
+            connection_send,
         }
     }
 }
@@ -171,7 +175,10 @@ impl Future for Manager {
                 }
             };
 
-            if let Err(_) = sender.send(Datapacket { from, data: buf.filled_mut().to_vec() }) {
+            if let Err(_) = sender.send(Datapacket {
+                from,
+                data: buf.filled_mut().to_vec(),
+            }) {
                 error!("Failed to send data to thread!");
             }
         }

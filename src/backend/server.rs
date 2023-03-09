@@ -2,13 +2,14 @@ use std::{
     collections::HashMap,
     future::Future,
     io,
+    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Poll},
-    time::Instant, net::SocketAddr,
+    time::Instant,
 };
 
-use log::{error};
+use log::error;
 use quiche::Connection;
 use tokio::{
     net::UdpSocket,
@@ -20,7 +21,7 @@ use tokio::{
 
 use crate::{stream::QuicStream, Message, STREAM_BUFFER_SIZE};
 
-use super::{timer::Timer, manager::Datapacket};
+use super::{manager::Datapacket, timer::Timer};
 
 pub struct Handshaker<'a>(pub &'a mut Inner);
 
@@ -49,7 +50,7 @@ pub struct Inner {
     pub recv_buf: Vec<u8>,
     pub send_buf: Vec<u8>,
     pub timer: Timer,
-    last_address: Option<SocketAddr>
+    last_address: Option<SocketAddr>,
 }
 
 impl Inner {
@@ -110,7 +111,11 @@ impl Inner {
 
         if self.send_flush {
             while self.send_pos != self.send_end {
-                let n = ready!(self.io.poll_send_to(cx, &mut self.send_buf[self.send_pos..], self.last_address.unwrap()))?;
+                let n = ready!(self.io.poll_send_to(
+                    cx,
+                    &mut self.send_buf[self.send_pos..],
+                    self.last_address.unwrap()
+                ))?;
                 self.send_pos += n;
             }
 
@@ -139,9 +144,11 @@ impl Inner {
             }
         }
 
-        let n = ready!(self
-            .io
-            .poll_send_to(cx, &mut self.send_buf[self.send_pos..self.send_end], self.last_address.unwrap()))?;
+        let n = ready!(self.io.poll_send_to(
+            cx,
+            &mut self.send_buf[self.send_pos..self.send_end],
+            self.last_address.unwrap()
+        ))?;
         self.send_pos += n;
 
         Poll::Ready(Ok(()))

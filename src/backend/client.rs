@@ -1,9 +1,24 @@
-use std::{collections::HashMap, sync::Arc, io, future::Future, task::{Poll, ready}, time::Instant, pin::Pin};
+use std::{
+    collections::HashMap,
+    future::Future,
+    io,
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Poll},
+    time::Instant,
+};
 
 use quiche::Connection;
-use tokio::{sync::{mpsc::{self, UnboundedSender, UnboundedReceiver}, Mutex}, io::ReadBuf, net::UdpSocket};
+use tokio::{
+    io::ReadBuf,
+    net::UdpSocket,
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Mutex,
+    },
+};
 
-use crate::{STREAM_BUFFER_SIZE, Message, stream::QuicStream};
+use crate::{stream::QuicStream, Message, STREAM_BUFFER_SIZE};
 
 use super::timer::Timer;
 
@@ -44,7 +59,7 @@ impl Inner {
         send_pos: usize,
         recv_buf: Vec<u8>,
         send_buf: Vec<u8>,
-        timer: Timer
+        timer: Timer,
     ) -> Self {
         Self {
             io,
