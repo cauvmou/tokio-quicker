@@ -55,9 +55,9 @@ use tokio::{
 
 mod backend;
 pub mod config;
-mod connection;
+pub mod connection;
 mod crypto;
-mod stream;
+pub mod stream;
 
 #[derive(Debug)]
 pub enum Message {
