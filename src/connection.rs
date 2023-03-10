@@ -69,11 +69,17 @@ impl QuicConnection<Server> {
         }
     }
 
+    #[inline]
+    /// Returns `None` if the driver is has closed the stream
+    pub async fn incoming(&mut self) -> Option<QuicStream> {
+        self.incoming_recv.recv().await
+    }
+
     /// Opens a new bidi stream to the remote.
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2;
+        let id = *next << 2 + 1;
         let stream = QuicStream {
             id,
             rx,
@@ -85,10 +91,20 @@ impl QuicConnection<Server> {
         stream
     }
 
-    #[inline]
-    /// Returns `None` if the driver is has closed the stream
-    pub async fn incoming(&mut self) -> Option<QuicStream> {
-        self.incoming_recv.recv().await
+    /// Opens a new uni stream to the remote.
+    pub async fn open_uni(&mut self) -> QuicStream {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut next = self.stream_next.lock().await;
+        let id = *next << 2 + 3;
+        let stream = QuicStream {
+            id,
+            rx,
+            tx: self.message_send.clone(),
+        };
+        let mut map = self.stream_map.lock().await;
+        map.insert(id, tx);
+        *next += 1;
+        stream
     }
 }
 
@@ -130,7 +146,23 @@ impl QuicConnection<Client> {
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2 + 1;
+        let id = *next << 2;
+        let stream = QuicStream {
+            id,
+            rx,
+            tx: self.message_send.clone(),
+        };
+        let mut map = self.stream_map.lock().await;
+        map.insert(id, tx);
+        *next += 1;
+        stream
+    }
+
+    /// Opens a new uni stream to the remote.
+    pub async fn open_uni(&mut self) -> QuicStream {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut next = self.stream_next.lock().await;
+        let id = *next << 2 + 2;
         let stream = QuicStream {
             id,
             rx,
