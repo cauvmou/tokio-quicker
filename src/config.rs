@@ -1,7 +1,9 @@
 pub const MAX_DATAGRAM_SIZE: usize = 1350;
 pub const STREAM_BUFFER_SIZE: usize = 64 * 1024;
 
+#[cfg(feature = "key-gen")]
 const KEY: &'static [u8] = include_bytes!("./keys/cert.key");
+#[cfg(feature = "key-gen")]
 const CERT: &'static [u8] = include_bytes!("./keys/cert.crt");
 
 #[cfg(feature = "key-gen")]
