@@ -89,21 +89,26 @@ impl QuicListener {
         addr: A,
         key_pem: &str,
         cert_pem: &str,
+        secret: Vec<u8>
     ) -> Result<Self, io::Error> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
         config.load_cert_chain_from_pem_file(cert_pem).unwrap();
-        Self::bind_with_config(addr, config).await
+        Self::bind_with_config(addr, config, secret).await
     }
 
     #[cfg(feature = "key-gen")]
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
-        Self::bind_with_config(addr, config::default()).await
+        use ring::rand::Random;
+        let rng = SystemRandom::new();
+        let random: Random<[u8; 16]> = ring::rand::generate(&rng).unwrap();
+        Self::bind_with_config(addr, config::default(), random.expose().to_vec()).await
     }
 
     pub async fn bind_with_config<A: ToSocketAddrs>(
         addr: A,
         config: quiche::Config,
+        secret: Vec<u8>
     ) -> Result<Self, io::Error> {
         let io = Arc::new(UdpSocket::bind(addr).await?);
         let rng = SystemRandom::new();
@@ -111,7 +116,7 @@ impl QuicListener {
         let manager = Manager::new(
             io.clone(),
             ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap(),
-            b"This is a super secret token!".to_vec(),
+            secret,
             config,
             tx,
         );
