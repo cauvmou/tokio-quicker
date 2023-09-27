@@ -5,16 +5,18 @@
 //! #### [Client](https://github.com/cauvmou/tokio-quic/blob/main/examples/client.rs)
 //!
 //! First create a `QuicSocket`.
-//! ```rs
-//! let mut connection: QuicConnection<Client> = QuicSocket::bind("127.0.0.1:0").await?
-//!         .connect(Some("localhost"), "127.0.0.1:4433").await?;
+//! ```rust
+//! let mut connection = QuicSocket::bind("127.0.0.1:0")
+//!         .await?
+//!         .connect(Some("localhost"), "127.0.0.1:4433")
+//!         .await?;
 //! ```
 //! Then you can start opening new `QuicStream`s or receive incoming ones from the server.
-//! ```rs
-//! let mut stream: QuicStream = connection.open().await;
+//! ```rust
+//! let mut stream = connection.bidi(1).await?;
 //! ```
-//! ```rs
-//! let mut stream: QuicStream = connection.incoming().await.unwrap();
+//! ```rust
+//! let mut stream = connection.incoming().await?;
 //! ```
 //! These implement the tokio `AsyncRead` and `AsyncWrite` traits.
 //!
@@ -22,14 +24,16 @@
 //!
 //! Again create a `QuicListener`.
 //!
-//! ```rs
-//! let mut listener: QuicListener = QuicListener::bind("127.0.0.1:4433").await?;
+//! ```rust
+//! let mut listener = QuicListener::bind("127.0.0.1:4433").await?;
 //! ```
 //! Then you can use a while loop to accept incoming connection and either handle them directly on the thread or move them to a new one.
-//! ```rs
-//! while let Ok(mut connection: QuicConnection<Server>) = listener.accept().await {
+//! ```rust
+//! while let Ok(mut connection) = listener.accept().await {
 //!     tokio::spawn(async move {
+//!         let mut stream = connection.incoming().await?;
 //!         ...
+//!         stream.shutdown().await?;
 //!     });
 //! }
 //! ```
@@ -61,7 +65,7 @@ pub mod stream;
 pub mod error;
 
 #[derive(Debug)]
-pub enum Message {
+pub(crate) enum Message {
     Data {
         stream_id: u64,
         bytes: Vec<u8>,
