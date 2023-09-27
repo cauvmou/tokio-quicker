@@ -60,7 +60,6 @@ impl Future for Manager {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        info!("Manager is running");
         let mut buffer: Vec<u8> = vec![0; 65535];
         let mut data_buf: Vec<u8> = vec![0; MAX_DATAGRAM_SIZE];
         'driver: loop {
@@ -88,7 +87,7 @@ impl Future for Manager {
                 }
 
                 if !quiche::version_is_supported(hdr.version) {
-                    warn!("Version negotiation.");
+                    warn!("Requested version not supported, starting to negotiate...");
                     let len =
                         quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut data_buf).unwrap();
                     let data_buf = &data_buf[..len];

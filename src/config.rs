@@ -14,7 +14,7 @@ pub fn default() -> quiche::Config {
     let x509 = boring::x509::X509::from_pem(CERT).unwrap();
     ctx.set_certificate(x509.as_ref()).unwrap();
     let mut config =
-        quiche::Config::with_boring_ssl_ctx(quiche::PROTOCOL_VERSION, ctx.build()).unwrap();
+        quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, ctx).unwrap();
     config
         .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
         .unwrap();

@@ -30,10 +30,10 @@ fn gen_key() {
     x509.set_serial_number(&serial_number).unwrap();
 
     let mut name = boring::x509::X509Name::builder().unwrap();
-    name.append_entry_by_text("C", "LM").unwrap();
-    name.append_entry_by_text("ST", "AO").unwrap();
-    name.append_entry_by_text("O", "something").unwrap();
     name.append_entry_by_text("CN", "localhost").unwrap();
+    //name.append_entry_by_text("C", "LM").unwrap();
+    //name.append_entry_by_text("ST", "AO").unwrap();
+    //name.append_entry_by_text("O", "something").unwrap();
     let name = name.build();
     x509.set_subject_name(&name).unwrap();
     x509.set_issuer_name(&name).unwrap();
@@ -70,7 +70,8 @@ fn gen_key() {
     x509.append_extension(auth_key_identifier).unwrap();
 
     x509.sign(&pkey, MessageDigest::sha256()).unwrap();
-
+    // TODO: Move to target directory and pass path via ENV
+    let _ = std::fs::create_dir("./src/keys");
     std::fs::write("./src/keys/cert.key", priv_key).unwrap();
     std::fs::write("./src/keys/cert.crt", x509.build().to_pem().unwrap()).unwrap();
 }

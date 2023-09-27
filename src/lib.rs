@@ -43,7 +43,7 @@ use backend::{
     timer::Timer,
 };
 use config::{MAX_DATAGRAM_SIZE, STREAM_BUFFER_SIZE};
-use connection::{Client, QuicConnection, Server};
+use connection::{ToServer, QuicConnection, ToClient};
 use quiche::ConnectionId;
 use rand::Rng;
 use ring::rand::SystemRandom;
@@ -129,7 +129,7 @@ impl QuicListener {
     }
 
     /// Accepts a incoming connection.
-    pub async fn accept(&mut self) -> Result<QuicConnection<Server>, io::Error> {
+    pub async fn accept(&mut self) -> Result<QuicConnection<ToClient>, io::Error> {
         let manager::Client { connection, recv } = self.connection_recv.recv().await.unwrap();
 
         let mut inner = server::Inner::new(
@@ -146,7 +146,7 @@ impl QuicListener {
 
         server::Handshaker(&mut inner).await?;
 
-        Ok(QuicConnection::<Server>::new(inner))
+        Ok(QuicConnection::<ToClient>::new(inner))
     }
 }
 
@@ -201,7 +201,7 @@ impl QuicSocket {
         &mut self,
         server_name: Option<&str>,
         addr: A,
-    ) -> Result<QuicConnection<Client>, io::Error> {
+    ) -> Result<QuicConnection<ToServer>, io::Error> {
         self.io.connect(addr).await?;
         let mut scid = vec![0; 16];
         rand::thread_rng().fill(&mut *scid);
@@ -228,6 +228,6 @@ impl QuicSocket {
 
         client::Handshaker(&mut inner).await?;
 
-        Ok(QuicConnection::<Client>::new(inner))
+        Ok(QuicConnection::<ToServer>::new(inner))
     }
 }

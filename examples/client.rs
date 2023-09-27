@@ -1,3 +1,4 @@
+#![allow(clippy::unused_io_amount)]
 use std::io;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -5,7 +6,7 @@ use tokio_quic::QuicSocket;
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
-    //simple_logger::SimpleLogger::new().init();
+    simple_logger::SimpleLogger::new().init().unwrap();
 
     let mut connection = QuicSocket::bind("127.0.0.1:0")
         .await?

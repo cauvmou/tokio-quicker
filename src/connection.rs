@@ -15,10 +15,10 @@ use crate::{
 };
 
 pub trait Backend {}
-pub struct Client;
-impl Backend for Client {}
-pub struct Server;
-impl Backend for Server {}
+pub struct ToServer;
+impl Backend for ToServer {}
+pub struct ToClient;
+impl Backend for ToClient {}
 
 /// A `QuicConnection` represents a connection to a remote host.
 ///
@@ -41,7 +41,7 @@ pub struct QuicConnection<T: Backend + Send> {
     state: PhantomData<T>,
 }
 
-impl QuicConnection<Server> {
+impl QuicConnection<ToClient> {
     pub(crate) fn new(inner: server::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
         let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
@@ -108,7 +108,7 @@ impl QuicConnection<Server> {
     }
 }
 
-impl QuicConnection<Client> {
+impl QuicConnection<ToServer> {
     pub(crate) fn new(inner: client::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
         let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =

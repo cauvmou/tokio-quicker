@@ -1,3 +1,4 @@
+#![allow(clippy::unused_io_amount)]
 use std::{fs, io};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -5,7 +6,7 @@ use tokio_quic::QuicListener;
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
-    //simple_logger::SimpleLogger::new().init();
+    simple_logger::SimpleLogger::new().init().unwrap();
 
     let mut listener = QuicListener::bind("127.0.0.1:4433").await?;
 
