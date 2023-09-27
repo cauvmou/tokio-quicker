@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
-use crate::Message;
+use crate::{Message, error::{Result}};
 
 #[derive(Debug)]
 /// Implements the `AsyncRead` and `AsyncWrite` traits.
@@ -13,7 +13,7 @@ use crate::Message;
 /// Shutdown permanently closes the quic stream.
 pub struct QuicStream {
     pub(crate) id: u64,
-    pub(crate) rx: UnboundedReceiver<Result<Message, quiche::Error>>,
+    pub(crate) rx: UnboundedReceiver<Result<Message>>,
     pub(crate) tx: UnboundedSender<Message>,
 }
 
@@ -28,7 +28,7 @@ impl AsyncRead for QuicStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         match self.rx.poll_recv(cx) {
             Poll::Ready(Some(message)) => match message {
                 Ok(Message::Data {
@@ -59,7 +59,7 @@ impl AsyncWrite for QuicStream {
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
         buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
+    ) -> Poll<std::result::Result<usize, io::Error>> {
         let message = Message::Data {
             stream_id: self.id,
             bytes: buf.to_vec(),
@@ -74,14 +74,14 @@ impl AsyncWrite for QuicStream {
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
+    ) -> Poll<std::result::Result<(), io::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
+    ) -> Poll<std::result::Result<(), io::Error>> {
         let message = Message::Close(self.id);
         match self.tx.send(message) {
             Ok(_) => Poll::Ready(Ok(())),

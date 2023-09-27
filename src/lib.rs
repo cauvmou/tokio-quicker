@@ -58,6 +58,7 @@ pub mod config;
 pub mod connection;
 mod crypto;
 pub mod stream;
+pub mod error;
 
 #[derive(Debug)]
 pub enum Message {

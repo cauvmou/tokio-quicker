@@ -18,7 +18,7 @@ use tokio::{
     },
 };
 
-use crate::{stream::QuicStream, Message, STREAM_BUFFER_SIZE};
+use crate::{stream::QuicStream, Message, STREAM_BUFFER_SIZE, error::{Result, Error}};
 
 use super::timer::Timer;
 
@@ -78,7 +78,7 @@ impl Inner {
     pub fn poll_io_complete(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<()>, io::Error>> {
+    ) -> Poll<Result<Option<()>>> {
         if self.timer.ready() {
             self.connection.on_timeout();
         }
@@ -99,7 +99,7 @@ impl Inner {
         }
     }
 
-    fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
         if self.send_flush {
             while self.send_pos != self.send_end {
                 let n = ready!(self.io.poll_send(cx, &mut self.send_buf[self.send_pos..]))?;
@@ -138,7 +138,7 @@ impl Inner {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
         let buf = &mut ReadBuf::new(&mut self.recv_buf);
         let from = ready!(self.io.poll_recv_from(cx, buf))?;
         let info = quiche::RecvInfo {
@@ -160,8 +160,7 @@ impl Inner {
 
 pub struct Driver {
     pub inner: Inner,
-    pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>,
-    pub stream_next: Arc<Mutex<u64>>,
+    pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message>>>>>,
     pub message_recv: UnboundedReceiver<Message>,
     pub message_send: UnboundedSender<Message>,
     pub incoming_send: UnboundedSender<QuicStream>,
@@ -169,7 +168,7 @@ pub struct Driver {
 
 // Backend Driver
 impl Future for Driver {
-    type Output = Result<(), io::Error>;
+    type Output = Result<()>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -196,7 +195,7 @@ impl Future for Driver {
                 if let Err(err) = result {
                     let mut map = pollster::block_on(self.stream_map.lock());
                     if let Some(tx) = map.get_mut(&stream_id) {
-                        let _ = tx.send(Err(err));
+                        let _ = tx.send(Err(err.into()));
                     }
                 }
             }
@@ -209,8 +208,6 @@ impl Future for Driver {
                 let map = self.stream_map.clone();
                 let mut map = pollster::block_on(map.lock());
 
-                let mut next = pollster::block_on(self.stream_next.lock());
-
                 let message_send = self.message_send.clone();
                 let tx = map.entry(stream_id).or_insert_with(move || {
                     let (tx, rx) = mpsc::unbounded_channel();
@@ -221,9 +218,6 @@ impl Future for Driver {
                             tx: message_send,
                         })
                         .unwrap();
-                    if stream_id >= *next {
-                        *next += stream_id + 1;
-                    }
                     tx
                 });
 
@@ -240,7 +234,7 @@ impl Future for Driver {
                         }));
                     }
                     Err(err) => {
-                        let _ = tx.send(Err(err));
+                        let _ = tx.send(Err(err.into()));
                     }
                 }
             }
