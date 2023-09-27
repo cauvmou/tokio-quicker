@@ -20,6 +20,8 @@ impl Backend for ToServer {}
 pub struct ToClient;
 impl Backend for ToClient {}
 
+type AsyncStreamMap = Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>;
+
 /// A `QuicConnection` represents a connection to a remote host.
 ///
 /// ```rs
@@ -34,7 +36,7 @@ impl Backend for ToClient {}
 pub struct QuicConnection<T: Backend + Send> {
     #[allow(unused)]
     handle: JoinHandle<Result<(), io::Error>>,
-    stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>>, // Map each stream to a `Sender`
+    stream_map: AsyncStreamMap, // Map each stream to a `Sender`
     stream_next: Arc<Mutex<u64>>,           // Next available stream id
     message_send: UnboundedSender<Message>, // This is passed to each stream.
     incoming_recv: UnboundedReceiver<QuicStream>,
@@ -44,7 +46,7 @@ pub struct QuicConnection<T: Backend + Send> {
 impl QuicConnection<ToClient> {
     pub(crate) fn new(inner: server::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
-        let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
+        let stream_map: AsyncStreamMap =
             Arc::new(Mutex::new(HashMap::new()));
         let stream_next = Arc::new(Mutex::new(1));
         let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
@@ -111,7 +113,7 @@ impl QuicConnection<ToClient> {
 impl QuicConnection<ToServer> {
     pub(crate) fn new(inner: client::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
-        let stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message, quiche::Error>>>>> =
+        let stream_map: AsyncStreamMap =
             Arc::new(Mutex::new(HashMap::new()));
         let stream_next = Arc::new(Mutex::new(1));
         let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
@@ -146,7 +148,7 @@ impl QuicConnection<ToServer> {
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = (*next << 2);
+        let id = *next << 2;
         let stream = QuicStream {
             id,
             rx,
