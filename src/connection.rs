@@ -79,7 +79,7 @@ impl QuicConnection<ToClient> {
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2 + 1;
+        let id = (*next << 2) + 1;
         let stream = QuicStream {
             id,
             rx,
@@ -95,7 +95,7 @@ impl QuicConnection<ToClient> {
     pub async fn open_uni(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2 + 3;
+        let id = (*next << 2) + 3;
         let stream = QuicStream {
             id,
             rx,
@@ -146,7 +146,7 @@ impl QuicConnection<ToServer> {
     pub async fn open(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2;
+        let id = (*next << 2);
         let stream = QuicStream {
             id,
             rx,
@@ -162,7 +162,7 @@ impl QuicConnection<ToServer> {
     pub async fn open_uni(&mut self) -> QuicStream {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut next = self.stream_next.lock().await;
-        let id = *next << 2 + 2;
+        let id = (*next << 2) + 2;
         let stream = QuicStream {
             id,
             rx,
