@@ -1,11 +1,12 @@
-use boring::asn1::Asn1Time;
-use boring::bn::{BigNum, MsbOption};
-use boring::hash::MessageDigest;
-use boring::pkey::PKey;
-use boring::rsa::Rsa;
-use boring::x509::extension::{
+#[cfg(feature = "key-gen")]
+use boring::{asn1::Asn1Time,
+bn::{BigNum, MsbOption},
+hash::MessageDigest,
+pkey::PKey,
+rsa::Rsa,
+x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
-};
+}};
 
 pub const MAX_DATAGRAM_SIZE: usize = 1350;
 pub const STREAM_BUFFER_SIZE: usize = 64 * 1024;

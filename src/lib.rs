@@ -97,7 +97,7 @@ impl QuicListener {
         key_pem: &str,
         cert_pem: &str,
         secret: Vec<u8>,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Self> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
         config.load_cert_chain_from_pem_file(cert_pem).unwrap();
@@ -177,7 +177,7 @@ impl QuicSocket {
         addr: A,
         key_pem: &str,
         cert_pem: &str,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Self> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
         config.load_cert_chain_from_pem_file(cert_pem).unwrap();
