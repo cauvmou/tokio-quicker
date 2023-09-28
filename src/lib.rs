@@ -5,17 +5,17 @@
 //! #### [Client](https://github.com/cauvmou/tokio-quic/blob/main/examples/client.rs)
 //!
 //! First create a `QuicSocket`.
-//! ```rust
+//! ```rs
 //! let mut connection = QuicSocket::bind("127.0.0.1:0")
 //!         .await?
 //!         .connect(Some("localhost"), "127.0.0.1:4433")
 //!         .await?;
 //! ```
 //! Then you can start opening new `QuicStream`s or receive incoming ones from the server.
-//! ```rust
+//! ```rs
 //! let mut stream = connection.bidi(1).await?;
 //! ```
-//! ```rust
+//! ```rs
 //! let mut stream = connection.incoming().await?;
 //! ```
 //! These implement the tokio `AsyncRead` and `AsyncWrite` traits.
@@ -24,11 +24,11 @@
 //!
 //! Again create a `QuicListener`.
 //!
-//! ```rust
+//! ```rs
 //! let mut listener = QuicListener::bind("127.0.0.1:4433").await?;
 //! ```
 //! Then you can use a while loop to accept incoming connection and either handle them directly on the thread or move them to a new one.
-//! ```rust
+//! ```rs
 //! while let Ok(mut connection) = listener.accept().await {
 //!     tokio::spawn(async move {
 //!         let mut stream = connection.incoming().await?;
@@ -56,6 +56,8 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
     task::JoinHandle,
 };
+use crate::backend::Handshaker;
+use error::Result;
 
 mod backend;
 pub mod config;
@@ -84,7 +86,7 @@ pub(crate) enum Message {
 pub struct QuicListener {
     io: Arc<UdpSocket>,
     #[allow(unused)]
-    handle: JoinHandle<Result<(), io::Error>>,
+    handle: JoinHandle<Result<()>>,
     connection_recv: UnboundedReceiver<manager::Client>,
 }
 
@@ -103,7 +105,7 @@ impl QuicListener {
     }
 
     #[cfg(feature = "key-gen")]
-    pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
+    pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
         use ring::rand::Random;
         let rng = SystemRandom::new();
         let random: Random<[u8; 16]> = ring::rand::generate(&rng).unwrap();
@@ -114,7 +116,7 @@ impl QuicListener {
         addr: A,
         config: quiche::Config,
         secret: Vec<u8>
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Self> {
         let io = Arc::new(UdpSocket::bind(addr).await?);
         let rng = SystemRandom::new();
         let (tx, connection_recv) = mpsc::unbounded_channel();
@@ -134,22 +136,23 @@ impl QuicListener {
     }
 
     /// Accepts a incoming connection.
-    pub async fn accept(&mut self) -> Result<QuicConnection<ToClient>, io::Error> {
+    pub async fn accept(&mut self) -> Result<QuicConnection<ToClient>> {
         let manager::Client { connection, recv } = self.connection_recv.recv().await.unwrap();
 
-        let mut inner = server::Inner::new(
-            self.io.clone(),
+        let mut inner = server::Inner {
+            io: self.io.clone(),
             connection,
-            recv,
-            false,
-            0,
-            0,
-            vec![0; STREAM_BUFFER_SIZE],
-            vec![0; MAX_DATAGRAM_SIZE],
-            Timer::Unset,
-        );
+            data_recv: recv,
+            send_flush: false,
+            send_end: 0,
+            send_pos: 0,
+            recv_buf: vec![0; STREAM_BUFFER_SIZE],
+            send_buf: vec![0; MAX_DATAGRAM_SIZE],
+            timer: Timer::Unset,
+            last_address: None
+        };
 
-        server::Handshaker(&mut inner).await?;
+        Handshaker(&mut inner).await?;
 
         Ok(QuicConnection::<ToClient>::new(inner))
     }
@@ -183,7 +186,7 @@ impl QuicSocket {
 
     #[cfg(feature = "key-gen")]
     /// Bind to a specified address.
-    pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
+    pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
         Self::bind_with_config(addr, config::default()).await
     }
 
@@ -191,7 +194,7 @@ impl QuicSocket {
     pub async fn bind_with_config<A: ToSocketAddrs>(
         addr: A,
         config: quiche::Config,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Self> {
         Ok(Self {
             io: Arc::new(UdpSocket::bind(addr).await?),
             config,
@@ -206,7 +209,7 @@ impl QuicSocket {
         &mut self,
         server_name: Option<&str>,
         addr: A,
-    ) -> Result<QuicConnection<ToServer>, io::Error> {
+    ) -> Result<QuicConnection<ToServer>> {
         self.io.connect(addr).await?;
         let mut scid = vec![0; 16];
         rand::thread_rng().fill(&mut *scid);
@@ -220,18 +223,18 @@ impl QuicSocket {
         )
         .unwrap();
 
-        let mut inner = client::Inner::new(
-            self.io.clone(),
+        let mut inner = client::Inner {
+            io: self.io.clone(),
             connection,
-            false,
-            0,
-            0,
-            vec![0; STREAM_BUFFER_SIZE],
-            vec![0; MAX_DATAGRAM_SIZE],
-            Timer::Unset,
-        );
+            send_flush: false,
+            send_end: 0,
+            send_pos: 0,
+            recv_buf: vec![0; STREAM_BUFFER_SIZE],
+            send_buf: vec![0; MAX_DATAGRAM_SIZE],
+            timer: Timer::Unset,
+        };
 
-        client::Handshaker(&mut inner).await?;
+        Handshaker(&mut inner).await?;
 
         Ok(QuicConnection::<ToServer>::new(inner))
     }

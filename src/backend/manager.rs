@@ -12,6 +12,7 @@ use tokio::{
 use crate::{
     crypto::{mint_token, validate_token},
     MAX_DATAGRAM_SIZE,
+    error::Result
 };
 
 pub struct Client {
@@ -54,7 +55,7 @@ impl Manager {
 }
 
 impl Future for Manager {
-    type Output = Result<(), io::Error>;
+    type Output = Result<()>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,

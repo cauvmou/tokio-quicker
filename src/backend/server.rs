@@ -3,10 +3,8 @@ use std::{
     future::Future,
     io,
     net::SocketAddr,
-    pin::Pin,
     sync::Arc,
     task::{ready, Poll},
-    time::Instant,
 };
 
 use log::error;
@@ -20,29 +18,13 @@ use tokio::{
 };
 
 use crate::{stream::QuicStream, Message, STREAM_BUFFER_SIZE, error::{Result, Error}};
+use crate::backend::IoHandler;
 
 use super::{manager::Datapacket, timer::Timer};
 
-pub struct Handshaker<'a>(pub &'a mut Inner);
-
-impl<'a> Future for Handshaker<'a> {
-    type Output = io::Result<()>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        while !self.0.connection.is_established() {
-            if let Ok(opt) = ready!(self.0.poll_io_complete(cx)) {
-                if opt.is_none() && !self.0.connection.is_established() {
-                    return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
-                }
-            }
-        }
-        Poll::Ready(Ok(()))
-    }
-}
-
-pub struct Inner {
+pub(crate) struct Inner {
     pub io: Arc<UdpSocket>,
-    pub connection: quiche::Connection,
+    pub connection: Connection,
     pub data_recv: UnboundedReceiver<Datapacket>,
     pub send_flush: bool,
     pub send_end: usize,
@@ -50,57 +32,16 @@ pub struct Inner {
     pub recv_buf: Vec<u8>,
     pub send_buf: Vec<u8>,
     pub timer: Timer,
-    last_address: Option<SocketAddr>,
+    pub last_address: Option<SocketAddr>,
 }
 
-impl Inner {
-    pub fn new(
-        io: Arc<UdpSocket>,
-        connection: Connection,
-        data_recv: UnboundedReceiver<Datapacket>,
-        send_flush: bool,
-        send_end: usize,
-        send_pos: usize,
-        recv_buf: Vec<u8>,
-        send_buf: Vec<u8>,
-        timer: Timer,
-    ) -> Self {
-        Self {
-            io,
-            connection,
-            data_recv,
-            send_flush,
-            send_end,
-            send_pos,
-            recv_buf,
-            send_buf,
-            timer,
-            last_address: None,
-        }
+impl IoHandler for Inner {
+    fn timer(&mut self) -> &mut Timer {
+        &mut self.timer
     }
 
-    pub fn poll_io_complete(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<()>>> {
-        if self.timer.ready() {
-            self.connection.on_timeout();
-        }
-
-        if let Some(timeout) = self.connection.timeout() {
-            self.timer = Timer::Set(Instant::now() + timeout)
-        } else {
-            self.timer = Timer::Unset;
-        }
-
-        let recv_result = self.poll_recv(cx)?;
-        let send_result = self.poll_send(cx)?;
-
-        match (self.connection.is_closed(), recv_result, send_result) {
-            (true, ..) => Poll::Ready(Ok(None)),
-            (false, Poll::Pending, Poll::Pending) => Poll::Pending,
-            (..) => Poll::Ready(Ok(Some(()))),
-        }
+    fn connection(&mut self) -> &mut Connection {
+        &mut self.connection
     }
 
     fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
@@ -145,7 +86,7 @@ impl Inner {
 
         let n = ready!(self.io.poll_send_to(
             cx,
-            &mut self.send_buf[self.send_pos..self.send_end],
+            &self.send_buf[self.send_pos..self.send_end],
             self.last_address.unwrap()
         ))?;
         self.send_pos += n;
@@ -173,7 +114,7 @@ impl Inner {
     }
 }
 
-pub struct Driver {
+pub(crate) struct Driver {
     pub inner: Inner,
     pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message>>>>>,
     pub message_recv: UnboundedReceiver<Message>,
