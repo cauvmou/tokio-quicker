@@ -32,7 +32,7 @@ pub(crate) struct Driver<Inner: IoHandler> {
 
 impl<Inner: IoHandler> Unpin for Driver<Inner> {}
 
-impl<Inner: IoHandler + Deref + DerefMut> Future for Driver<Inner> {
+impl<Inner: IoHandler> Future for Driver<Inner> {
     type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
