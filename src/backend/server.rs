@@ -1,8 +1,4 @@
-use std::ops::{Deref, DerefMut};
 use std::{
-    collections::HashMap,
-    future::Future,
-    io,
     net::SocketAddr,
     sync::Arc,
     task::{ready, Poll},
@@ -10,21 +6,11 @@ use std::{
 
 use log::error;
 use quiche::Connection;
-use tokio::{
-    net::UdpSocket,
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex,
-    },
-};
+use tokio::{net::UdpSocket, sync::mpsc::UnboundedReceiver};
 
 use super::{manager::Datapacket, timer::Timer};
-use crate::backend::{to_io_error, to_wire, Driver, IoHandler};
-use crate::{
-    error::{Error, Result},
-    stream::QuicStream,
-    Message, STREAM_BUFFER_SIZE,
-};
+use crate::backend::{to_io_error, to_wire, IoHandler};
+use crate::error::Result;
 
 pub(crate) struct Inner {
     pub io: Arc<UdpSocket>,

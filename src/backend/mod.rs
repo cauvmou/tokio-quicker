@@ -1,15 +1,14 @@
 use super::error::Result;
 use crate::backend::timer::Timer;
 use crate::config::STREAM_BUFFER_SIZE;
-use crate::connection::Backend;
+
 use crate::stream::QuicStream;
 use crate::Message;
 use quiche::Connection;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Poll};

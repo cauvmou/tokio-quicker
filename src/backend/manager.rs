@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, io, net::SocketAddr, sync::Arc, task::ready};
+use std::{collections::HashMap, future::Future, net::SocketAddr, sync::Arc, task::ready};
 
 use log::{error, info, warn};
 use quiche::ConnectionId;

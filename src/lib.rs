@@ -173,11 +173,7 @@ pub struct QuicSocket {
 impl QuicSocket {
     #[cfg(not(feature = "key-gen"))]
     /// Bind to a specified address.
-    pub async fn bind<A: ToSocketAddrs>(
-        addr: A,
-        key_pem: &str,
-        cert_pem: &str,
-    ) -> Result<Self> {
+    pub async fn bind<A: ToSocketAddrs>(addr: A, key_pem: &str, cert_pem: &str) -> Result<Self> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
         config.load_cert_chain_from_pem_file(cert_pem).unwrap();

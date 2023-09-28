@@ -1,29 +1,14 @@
-use std::ops::{Deref, DerefMut};
 use std::{
-    collections::HashMap,
-    future::Future,
-    io,
     sync::Arc,
     task::{ready, Poll},
 };
 
 use quiche::Connection;
-use tokio::{
-    io::ReadBuf,
-    net::UdpSocket,
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex,
-    },
-};
+use tokio::{io::ReadBuf, net::UdpSocket};
 
-use crate::backend::{to_io_error, to_wire, Driver, IoHandler};
-use crate::connection::ToServer;
-use crate::{
-    error::{Error, Result},
-    stream::QuicStream,
-    Message, STREAM_BUFFER_SIZE,
-};
+use crate::backend::{to_io_error, to_wire, IoHandler};
+
+use crate::error::Result;
 
 use super::timer::Timer;
 
