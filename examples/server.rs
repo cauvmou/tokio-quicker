@@ -2,8 +2,8 @@
 use std::fs;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_quic::QuicListener;
 use tokio_quic::error::Result;
+use tokio_quic::QuicListener;
 
 #[tokio::main]
 async fn main() -> Result<()> {

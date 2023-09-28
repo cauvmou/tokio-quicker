@@ -38,8 +38,9 @@
 //! }
 //! ```
 
-use std::{io, sync::Arc};
+use std::sync::Arc;
 
+use crate::backend::Handshaker;
 use backend::{
     client,
     manager::{self, Manager},
@@ -47,7 +48,8 @@ use backend::{
     timer::Timer,
 };
 use config::{MAX_DATAGRAM_SIZE, STREAM_BUFFER_SIZE};
-use connection::{ToServer, QuicConnection, ToClient};
+use connection::{QuicConnection, ToClient, ToServer};
+use error::Result;
 use quiche::ConnectionId;
 use rand::Rng;
 use ring::rand::SystemRandom;
@@ -56,15 +58,13 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
     task::JoinHandle,
 };
-use crate::backend::Handshaker;
-use error::Result;
 
 mod backend;
 pub mod config;
 pub mod connection;
 mod crypto;
-pub mod stream;
 pub mod error;
+pub mod stream;
 
 #[derive(Debug)]
 pub(crate) enum Message {
@@ -96,7 +96,7 @@ impl QuicListener {
         addr: A,
         key_pem: &str,
         cert_pem: &str,
-        secret: Vec<u8>
+        secret: Vec<u8>,
     ) -> Result<Self, io::Error> {
         let mut config = config::default();
         config.load_priv_key_from_pem_file(key_pem).unwrap();
@@ -115,7 +115,7 @@ impl QuicListener {
     pub async fn bind_with_config<A: ToSocketAddrs>(
         addr: A,
         config: quiche::Config,
-        secret: Vec<u8>
+        secret: Vec<u8>,
     ) -> Result<Self> {
         let io = Arc::new(UdpSocket::bind(addr).await?);
         let rng = SystemRandom::new();
@@ -149,7 +149,7 @@ impl QuicListener {
             recv_buf: vec![0; STREAM_BUFFER_SIZE],
             send_buf: vec![0; MAX_DATAGRAM_SIZE],
             timer: Timer::Unset,
-            last_address: None
+            last_address: None,
         };
 
         Handshaker(&mut inner).await?;

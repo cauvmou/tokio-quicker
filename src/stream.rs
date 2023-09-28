@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
-use crate::{Message, error::{Result}};
+use crate::{error::Result, Message};
 
 #[derive(Debug)]
 /// Implements the `AsyncRead` and `AsyncWrite` traits.

@@ -3,13 +3,15 @@ use boring::bn::{BigNum, MsbOption};
 use boring::hash::MessageDigest;
 use boring::pkey::PKey;
 use boring::rsa::Rsa;
-use boring::x509::extension::{AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier};
+use boring::x509::extension::{
+    AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
+};
 
 pub const MAX_DATAGRAM_SIZE: usize = 1350;
 pub const STREAM_BUFFER_SIZE: usize = 64 * 1024;
 
 #[cfg(feature = "key-gen")]
-pub fn generate_local_certificate() -> (Vec<u8>, Vec<u8>){
+pub fn generate_local_certificate() -> (Vec<u8>, Vec<u8>) {
     let rsa = Rsa::generate(2048).unwrap();
     let pkey = PKey::from_rsa(rsa).unwrap();
 
@@ -49,7 +51,7 @@ pub fn generate_local_certificate() -> (Vec<u8>, Vec<u8>){
             .build()
             .unwrap(),
     )
-        .unwrap();
+    .unwrap();
 
     let subject_key_identifier = SubjectKeyIdentifier::new()
         .build(&x509.x509v3_context(None, None))

@@ -1,8 +1,8 @@
 #![allow(clippy::unused_io_amount)]
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_quic::QuicSocket;
 use tokio_quic::error::Result;
+use tokio_quic::QuicSocket;
 
 #[tokio::main]
 async fn main() -> Result<()> {

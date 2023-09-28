@@ -11,8 +11,8 @@ use tokio::{
 
 use crate::{
     crypto::{mint_token, validate_token},
+    error::Result,
     MAX_DATAGRAM_SIZE,
-    error::Result
 };
 
 pub struct Client {

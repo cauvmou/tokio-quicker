@@ -8,11 +8,12 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::backend::Driver;
 use crate::{
     backend::{client, server},
+    error::Result,
     stream::QuicStream,
     Message,
-    error::Result
 };
 
 pub trait Backend {}
@@ -48,11 +49,10 @@ pub struct QuicConnection<T: Backend + Send> {
 impl QuicConnection<ToClient> {
     pub(crate) fn new(inner: server::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
-        let stream_map: AsyncStreamMap =
-            Arc::new(Mutex::new(HashMap::new()));
+        let stream_map: AsyncStreamMap = Arc::new(Mutex::new(HashMap::new()));
         let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
 
-        let driver = server::Driver {
+        let driver = Driver {
             inner,
             stream_map: stream_map.clone(),
             message_recv,
@@ -83,7 +83,9 @@ impl QuicConnection<ToClient> {
     pub async fn bidi(&mut self, id: u64) -> Result<QuicStream> {
         let mut map = self.stream_map.lock().await;
         let id = (id << 2) | 0b01;
-        if map.contains_key(&id) { return Err(super::error::Error::IdAlreadyTaken(id))}
+        if map.contains_key(&id) {
+            return Err(super::error::Error::IdAlreadyTaken(id));
+        }
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = QuicStream {
             id,
@@ -94,7 +96,6 @@ impl QuicConnection<ToClient> {
         Ok(stream)
     }
 
-
     /// Opens a new uni stream to the client.
     ///
     /// # Arguments
@@ -102,7 +103,9 @@ impl QuicConnection<ToClient> {
     pub async fn uni(&mut self, id: u64) -> Result<QuicStream> {
         let mut map = self.stream_map.lock().await;
         let id = (id << 2) | 0b11;
-        if map.contains_key(&id) { return Err(super::error::Error::IdAlreadyTaken(id))}
+        if map.contains_key(&id) {
+            return Err(super::error::Error::IdAlreadyTaken(id));
+        }
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = QuicStream {
             id,
@@ -117,11 +120,10 @@ impl QuicConnection<ToClient> {
 impl QuicConnection<ToServer> {
     pub(crate) fn new(inner: client::Inner) -> Self {
         let (message_send, message_recv) = mpsc::unbounded_channel::<Message>();
-        let stream_map: AsyncStreamMap =
-            Arc::new(Mutex::new(HashMap::new()));
+        let stream_map: AsyncStreamMap = Arc::new(Mutex::new(HashMap::new()));
         let (incoming_send, incoming_recv) = mpsc::unbounded_channel();
 
-        let driver = client::Driver {
+        let driver = Driver {
             inner,
             stream_map: stream_map.clone(),
             message_recv,
@@ -152,7 +154,9 @@ impl QuicConnection<ToServer> {
     pub async fn bidi(&mut self, id: u64) -> Result<QuicStream> {
         let mut map = self.stream_map.lock().await;
         let id = id << 2;
-        if map.contains_key(&id) { return Err(super::error::Error::IdAlreadyTaken(id))}
+        if map.contains_key(&id) {
+            return Err(super::error::Error::IdAlreadyTaken(id));
+        }
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = QuicStream {
             id,
@@ -163,7 +167,6 @@ impl QuicConnection<ToServer> {
         Ok(stream)
     }
 
-
     /// Opens a new uni stream to the server.
     ///
     /// # Arguments
@@ -171,15 +174,16 @@ impl QuicConnection<ToServer> {
     pub async fn uni(&mut self, id: u64) -> Result<QuicStream> {
         let mut map = self.stream_map.lock().await;
         let id = (id << 2) | 0b10;
-        if map.contains_key(&id) { return Err(super::error::Error::IdAlreadyTaken(id))}
+        if map.contains_key(&id) {
+            return Err(super::error::Error::IdAlreadyTaken(id));
+        }
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = QuicStream {
-        id,
-        rx,
-        tx: self.message_send.clone(),
+            id,
+            rx,
+            tx: self.message_send.clone(),
         };
         map.insert(id, tx);
         Ok(stream)
     }
-
 }
