@@ -12,6 +12,7 @@ use super::{manager::Datapacket, timer::Timer};
 use crate::backend::{to_io_error, to_wire, IoHandler};
 use crate::error::Result;
 
+#[allow(dead_code)]
 pub(crate) struct Inner {
     pub io: Arc<UdpSocket>,
     pub connection: Connection,
@@ -43,7 +44,7 @@ impl IoHandler for Inner {
             while self.send_pos != self.send_end {
                 let n = ready!(self.io.poll_send_to(
                     cx,
-                    &mut self.send_buf[self.send_pos..],
+                    &self.send_buf[self.send_pos..],
                     self.last_address.unwrap()
                 ))?;
                 self.send_pos += n;
