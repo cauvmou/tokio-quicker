@@ -1,5 +1,7 @@
 [package]
 name = "tokio-quic"
+description="A easy-to-use quic library for tokio."
+license="MIT"
 version = "0.0.1"
 authors = ["cauvmou <cauvmou.8855@gmail.com>"]
 edition = "2021"
