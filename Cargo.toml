@@ -7,7 +7,7 @@ readme = "README.md"
 keywords = ["quic", "tokio", "async"]
 categories = ["network-programming"]
 license = "MIT"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["cauvmou <cauvmou.8855@gmail.com>"]
 edition = "2021"
 
