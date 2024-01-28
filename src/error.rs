@@ -1,5 +1,4 @@
 use std::fmt::{Display, Formatter};
-use std::io::ErrorKind;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -31,7 +30,7 @@ impl From<std::io::Error> for Error {
 }
 
 impl From<std::io::ErrorKind> for Error {
-    fn from(value: ErrorKind) -> Self {
+    fn from(value: std::io::ErrorKind) -> Self {
         Self::IoError(value.into())
     }
 }

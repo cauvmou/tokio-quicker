@@ -112,7 +112,7 @@ impl Future for Manager {
 
                 // If empty mint new token
                 if token.is_empty() {
-                    let new_token = mint_token(&hdr, &from, &self.secret_sauce);
+                    let new_token = mint_token(&hdr.dcid, &from, &self.secret_sauce);
 
                     let len = quiche::retry(
                         &hdr.scid,
@@ -133,7 +133,7 @@ impl Future for Manager {
                     continue 'driver;
                 }
 
-                let odcid = validate_token(token, &from, &self.secret_sauce);
+                let odcid = validate_token(token, &from, &self.secret_sauce, Some(180));
 
                 if odcid.is_none() {
                     error!("Invalid address validation token");
