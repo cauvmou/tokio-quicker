@@ -8,17 +8,18 @@ use log::error;
 use quiche::Connection;
 use tokio::{net::UdpSocket, sync::mpsc::UnboundedReceiver};
 
-use super::{manager::Datapacket, timer::Timer};
+use super::{manager::DataPacket, timer::Timer};
 use crate::backend::{to_io_error, to_wire, IoHandler};
 use crate::error::Result;
 
 pub(crate) struct Inner {
     pub io: Arc<UdpSocket>,
     pub connection: Connection,
-    pub data_recv: UnboundedReceiver<Datapacket>,
+    pub data_recv: UnboundedReceiver<DataPacket>,
     pub send_flush: bool,
     pub send_end: usize,
     pub send_pos: usize,
+    #[allow(dead_code)]
     pub recv_buf: Vec<u8>,
     pub send_buf: Vec<u8>,
     pub timer: Timer,
@@ -43,7 +44,7 @@ impl IoHandler for Inner {
             while self.send_pos != self.send_end {
                 let n = ready!(self.io.poll_send_to(
                     cx,
-                    &mut self.send_buf[self.send_pos..],
+                    &self.send_buf[self.send_pos..],
                     self.last_address.unwrap()
                 ))?;
                 self.send_pos += n;
@@ -85,7 +86,7 @@ impl IoHandler for Inner {
     }
 
     fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
-        let Datapacket { from, mut data } = ready!(self.data_recv.poll_recv(cx)).unwrap();
+        let DataPacket { from, mut data } = ready!(self.data_recv.poll_recv(cx)).unwrap();
         let info = quiche::RecvInfo {
             from,
             to: self.io.local_addr()?,

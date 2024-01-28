@@ -7,7 +7,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     IdAlreadyTaken(u64),
     IoError(std::io::Error),
-    QuicheError(quiche::Error),
+    BackendError(quiche::Error),
 }
 
 impl Display for Error {
@@ -17,7 +17,7 @@ impl Display for Error {
                 write!(f, "Id: {id} is already taken by another open stream.")
             }
             Error::IoError(error) => write!(f, "{error}"),
-            Error::QuicheError(error) => write!(f, "{error}"),
+            Error::BackendError(error) => write!(f, "{error}"),
         }
     }
 }
@@ -38,6 +38,6 @@ impl From<std::io::ErrorKind> for Error {
 
 impl From<quiche::Error> for Error {
     fn from(value: quiche::Error) -> Self {
-        Self::QuicheError(value)
+        Self::BackendError(value)
     }
 }

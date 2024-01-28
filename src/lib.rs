@@ -38,6 +38,7 @@
 //! }
 //! ```
 
+use log::trace;
 use std::sync::Arc;
 
 use crate::backend::Handshaker;
@@ -117,6 +118,7 @@ impl QuicListener {
         config: quiche::Config,
         secret: Vec<u8>,
     ) -> Result<Self> {
+        trace!("Bind listener [{secret:?}]");
         let io = Arc::new(UdpSocket::bind(addr).await?);
         let rng = SystemRandom::new();
         let (tx, connection_recv) = mpsc::unbounded_channel();
@@ -151,9 +153,17 @@ impl QuicListener {
             timer: Timer::Unset,
             last_address: None,
         };
-
+        trace!(
+            "Accepted connection trace-id: {:?}, server-name: {:?}",
+            inner.connection.trace_id(),
+            inner.connection.server_name()
+        );
         Handshaker(&mut inner).await?;
-
+        trace!(
+            "Handshake complete trace-id: {:?}, server-name: {:?}",
+            inner.connection.trace_id(),
+            inner.connection.server_name()
+        );
         Ok(QuicConnection::<ToClient>::new(inner))
     }
 }

@@ -6,7 +6,7 @@ use tokio_quic::QuicSocket;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    //simple_logger::SimpleLogger::new().init().unwrap();
+    simple_logger::SimpleLogger::new().init().unwrap();
 
     let mut connection = QuicSocket::bind("127.0.0.1:0")
         .await?

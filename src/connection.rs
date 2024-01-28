@@ -1,3 +1,4 @@
+use log::trace;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use tokio::{
@@ -164,6 +165,7 @@ impl QuicConnection<ToServer> {
             tx: self.message_send.clone(),
         };
         map.insert(id, tx);
+        trace!("New bidi stream: {}", stream.id);
         Ok(stream)
     }
 
@@ -184,6 +186,7 @@ impl QuicConnection<ToServer> {
             tx: self.message_send.clone(),
         };
         map.insert(id, tx);
+        trace!("New uni stream: {}", stream.id);
         Ok(stream)
     }
 }
