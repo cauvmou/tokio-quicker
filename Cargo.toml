@@ -1,28 +1,28 @@
 [package]
 name = "tokio-quic"
-version = "0.1.0"
-authors = ["cauvmou <cauvmou.8855@gmail.com>", "quininer <quininer@live.com>"]
+version = "0.0.1"
+authors = ["cauvmou <cauvmou.8855@gmail.com>"]
 edition = "2021"
 
 [dependencies]
 log = "^0.4"
 rand = "^0.8"
-ring = "^0.16.20"
+ring = "^0.17"
 smallvec = "^1.10"
 tokio = { version = "1", features = ["full"] }
 tokio-timer = "^0.2"
-quiche = { version = "0.18", features = ["boringssl-boring-crate"] }
-boring = { version = "3.1", optional = true }
+quiche = { version = "0.20", features = ["boringssl-boring-crate"] }
+boring = { version = "4.4.0", optional = true }
 pollster = "^0.3.0"
 rust-crypto = "^0.2"
 chrono = "^0.4"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
-simple_logger = "^4.2"
+simple_logger = "^4.3"
 
 [build-dependencies]
-boring = "3.1.0"
+boring = "4.4.0"
 
 [features]
 key-gen = ["dep:boring"]
