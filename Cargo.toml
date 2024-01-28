@@ -1,5 +1,5 @@
 [package]
-name = "tokio-quicker"
+name = "tokio-quic"
 description="A easy-to-use quic library for tokio."
 license="MIT"
 version = "0.0.1"
