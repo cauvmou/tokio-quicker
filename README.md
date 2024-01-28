@@ -1,4 +1,4 @@
-# tokio-quic
+# tokio-quicker
 
 Async QUIC Listener/Socket for [tokio](https://tokio.rs/) using [quiche](https://github.com/cloudflare/quiche)/[quinn](https://github.com/quinn-rs/quinn).
 
