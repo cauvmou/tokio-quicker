@@ -14,10 +14,7 @@ use rand::RngCore;
 ///      3. Encrypt the the `Vec<u8>` from step 1 with those random bytes and the servers encryption secret.
 ///      4. Append the random bytes at the end of the newly encrypted `Vec<u8>`.
 pub(crate) fn mint_token(header: &Header, src: &SocketAddr, token_secret: &[u8]) -> Vec<u8> {
-    let octets = match src.ip() {
-        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-    };
+    let octets = ip_to_octets(&src.ip());
     let instant = chrono::Utc::now().timestamp();
     let dcid = header.dcid.to_vec();
     let bytes = [octets, instant.to_be_bytes().to_vec(), dcid].concat();
@@ -47,10 +44,7 @@ pub(crate) fn validate_token<'a>(
     let mut decrypted = encrypted.clone();
     crypto.decrypt(encrypted, &mut decrypted, tag);
 
-    let octets = match src.ip() {
-        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-    };
+    let octets = ip_to_octets(&src.ip());
     let mut timestamp: [u8; 8] = [0; 8];
     timestamp.copy_from_slice(&decrypted[octets.len()..octets.len() + 8]);
     let time: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_naive_utc_and_offset(
@@ -64,5 +58,13 @@ pub(crate) fn validate_token<'a>(
         ))
     } else {
         None
+    }
+}
+
+#[inline]
+fn ip_to_octets(ip: &std::net::IpAddr) -> Vec<u8> {
+    match ip {
+        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
     }
 }

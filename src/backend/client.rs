@@ -35,7 +35,7 @@ impl IoHandler for Inner {
     fn poll_send(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
         if self.send_flush {
             while self.send_pos != self.send_end {
-                let n = ready!(self.io.poll_send(cx, &mut self.send_buf[self.send_pos..]))?;
+                let n = ready!(self.io.poll_send(cx, &self.send_buf[self.send_pos..]))?;
                 self.send_pos += n;
             }
 
