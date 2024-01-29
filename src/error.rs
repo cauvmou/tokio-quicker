@@ -1,5 +1,4 @@
 use std::fmt::{Display, Formatter};
-use std::io::ErrorKind;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -7,7 +6,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     IdAlreadyTaken(u64),
     IoError(std::io::Error),
-    QuicheError(quiche::Error),
+    BackendError(quiche::Error),
 }
 
 impl Display for Error {
@@ -17,7 +16,7 @@ impl Display for Error {
                 write!(f, "Id: {id} is already taken by another open stream.")
             }
             Error::IoError(error) => write!(f, "{error}"),
-            Error::QuicheError(error) => write!(f, "{error}"),
+            Error::BackendError(error) => write!(f, "{error}"),
         }
     }
 }
@@ -31,13 +30,13 @@ impl From<std::io::Error> for Error {
 }
 
 impl From<std::io::ErrorKind> for Error {
-    fn from(value: ErrorKind) -> Self {
+    fn from(value: std::io::ErrorKind) -> Self {
         Self::IoError(value.into())
     }
 }
 
 impl From<quiche::Error> for Error {
     fn from(value: quiche::Error) -> Self {
-        Self::QuicheError(value)
+        Self::BackendError(value)
     }
 }

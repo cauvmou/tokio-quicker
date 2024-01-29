@@ -1,7 +1,6 @@
 use std::{collections::HashMap, future::Future, net::SocketAddr, sync::Arc, task::ready};
 
-use log::{error, info, warn};
-use quiche::ConnectionId;
+use log::{error, warn};
 use ring::hmac::Key;
 use tokio::{
     io::ReadBuf,
@@ -17,17 +16,19 @@ use crate::{
 
 pub struct Client {
     pub connection: quiche::Connection,
-    pub recv: UnboundedReceiver<Datapacket>,
+    pub recv: UnboundedReceiver<DataPacket>,
 }
 
-pub struct Datapacket {
+pub struct DataPacket {
     pub from: SocketAddr,
     pub data: Vec<u8>,
 }
 
+/// The Manager is responsible for driving the backend operations.
+/// It collects and emits data from the channels and quic streams.
 pub struct Manager {
     io: Arc<UdpSocket>,
-    client_map: HashMap<quiche::ConnectionId<'static>, UnboundedSender<Datapacket>>,
+    client_map: HashMap<quiche::ConnectionId<'static>, UnboundedSender<DataPacket>>,
     seed: Key,
     secret_sauce: Vec<u8>,
     config: quiche::Config,
@@ -42,7 +43,6 @@ impl Manager {
         config: quiche::Config,
         connection_send: UnboundedSender<Client>,
     ) -> Self {
-        info!("NEW MANAGER");
         Self {
             io,
             client_map: HashMap::new(),
@@ -77,18 +77,21 @@ impl Future for Manager {
 
             let conn_id = ring::hmac::sign(&self.seed, &hdr.dcid);
             let conn_id = &conn_id.as_ref()[..quiche::MAX_CONN_ID_LEN];
-            let conn_id: ConnectionId = conn_id.to_vec().into();
+            let conn_id: quiche::ConnectionId = conn_id.to_vec().into();
 
             let sender = if !self.client_map.contains_key(&hdr.dcid)
                 && !self.client_map.contains_key(&conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
-                    error!("Got Initial packet without having a saved connection.");
+                    error!("Got Initial packet without having a known connection.");
                     continue 'driver;
                 }
 
                 if !quiche::version_is_supported(hdr.version) {
-                    warn!("Requested version not supported, starting to negotiate...");
+                    warn!(
+                        "Requested version ({}) not supported, starting to negotiate...",
+                        hdr.version
+                    );
                     let len =
                         quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut data_buf).unwrap();
                     let data_buf = &data_buf[..len];
@@ -109,7 +112,7 @@ impl Future for Manager {
 
                 // If empty mint new token
                 if token.is_empty() {
-                    let new_token = mint_token(&hdr, &from, &self.secret_sauce);
+                    let new_token = mint_token(&hdr.dcid, &from, &self.secret_sauce);
 
                     let len = quiche::retry(
                         &hdr.scid,
@@ -130,7 +133,7 @@ impl Future for Manager {
                     continue 'driver;
                 }
 
-                let odcid = validate_token(token, &from, &self.secret_sauce);
+                let odcid = validate_token(token, &from, &self.secret_sauce, Some(180));
 
                 if odcid.is_none() {
                     error!("Invalid address validation token");
@@ -174,15 +177,11 @@ impl Future for Manager {
                     None => self.client_map.get_mut(&conn_id).unwrap(),
                 }
             };
-
-            if sender
-                .send(Datapacket {
-                    from,
-                    data: buf.filled_mut().to_vec(),
-                })
-                .is_err()
-            {
-                error!("Failed to send data to thread!");
+            if let Err(err) = sender.send(DataPacket {
+                from,
+                data: buf.filled_mut().to_vec(),
+            }) {
+                error!("Failed to send data to thread: {err}");
             }
         }
     }

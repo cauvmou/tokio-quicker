@@ -1,7 +1,14 @@
 [package]
-name = "tokio-quic"
-version = "0.1.0"
-authors = ["cauvmou <cauvmou.8855@gmail.com>", "quininer <quininer@live.com>"]
+name = "tokio-quicker"
+description = "A easy-to-use quic library for tokio."
+homepage = "https://github.com/cauvmou/tokio-quicker"
+documentation = "https://docs.rs/tokio-quicker/latest/tokio_quicker/"
+readme = "README.md"
+keywords = ["quic", "tokio", "async"]
+categories = ["network-programming"]
+license = "MIT"
+version = "0.0.2"
+authors = ["cauvmou <cauvmou.8855@gmail.com>"]
 edition = "2021"
 
 [dependencies]
@@ -12,7 +19,7 @@ smallvec = "^1.13"
 tokio = { version = "1", features = ["full"] }
 tokio-timer = "^0.2"
 quiche = { version = "0.20", features = ["boringssl-boring-crate"] }
-boring = { version = "4.4", optional = true }
+boring = { version = "4.4.0", optional = true }
 pollster = "^0.3.0"
 rust-crypto = "^0.2"
 chrono = "^0.4"

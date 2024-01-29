@@ -41,14 +41,12 @@ impl AsyncRead for QuicStream {
                     Poll::Ready(Ok(()))
                 }
                 Ok(Message::Close(_id)) => Poll::Ready(Ok(())),
-                Err(err) => {
-                    eprintln!("{err}");
-                    Poll::Ready(Ok(()))
-                }
+                Err(err) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, err.to_string()))),
             },
-            Poll::Ready(None) => {
-                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "Whoops")))
-            }
+            Poll::Ready(None) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "No new data is available to be read!",
+            ))),
             Poll::Pending => Poll::Pending,
         }
     }
