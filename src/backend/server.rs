@@ -12,6 +12,7 @@ use super::{manager::DataPacket, timer::Timer};
 use crate::backend::{to_io_error, to_wire, IoHandler};
 use crate::error::Result;
 
+#[allow(dead_code)]
 pub(crate) struct Inner {
     pub io: Arc<UdpSocket>,
     pub connection: Connection,

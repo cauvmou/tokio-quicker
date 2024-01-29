@@ -14,8 +14,8 @@ edition = "2021"
 [dependencies]
 log = "^0.4"
 rand = "^0.8"
-ring = "^0.17"
-smallvec = "^1.10"
+ring = "^0.17.7"
+smallvec = "^1.13"
 tokio = { version = "1", features = ["full"] }
 tokio-timer = "^0.2"
 quiche = { version = "0.20", features = ["boringssl-boring-crate"] }

@@ -163,7 +163,7 @@ impl Future for Manager {
                     recv: rx,
                 };
 
-                if let Err(_) = self.connection_send.send(client) {
+                if self.connection_send.send(client).is_err() {
                     error!("Failed to send client to thread!");
                     continue 'driver;
                 }
@@ -177,7 +177,6 @@ impl Future for Manager {
                     None => self.client_map.get_mut(&conn_id).unwrap(),
                 }
             };
-
             if let Err(err) = sender.send(DataPacket {
                 from,
                 data: buf.filled_mut().to_vec(),

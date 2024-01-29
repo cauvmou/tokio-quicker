@@ -35,13 +35,13 @@ pub(crate) fn mint_token(
 
 /// Do the steps that were listed above the `mint_token` function but in reverse.
 pub(crate) fn validate_token<'a>(
-    token: &Vec<u8>,
+    token: &[u8],
     src: &SocketAddr,
     token_secret: &[u8],
     expiration_duration: Option<i64>,
 ) -> Option<ConnectionId<'a>> {
     let random = &token[token.len() - 8..].to_vec();
-    let tag = &mut token.clone()[token.len() - 24..token.len() - 8].to_vec();
+    let tag = &mut token.to_owned()[token.len() - 24..token.len() - 8].to_vec();
     let encrypted = &token[..token.len() - 24].to_vec();
     let mut secret = [0u8; 32];
     crypto::hkdf::hkdf_extract(Sha256::new(), random, token_secret, &mut secret);
