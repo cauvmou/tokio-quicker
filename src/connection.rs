@@ -72,7 +72,7 @@ impl QuicConnection<ToClient> {
     }
 
     #[inline]
-    /// Returns `None` if the driver is has closed the stream
+    /// Returns `None` if the driver has closed the stream
     pub async fn incoming(&mut self) -> Option<QuicStream> {
         self.incoming_recv.recv().await
     }
@@ -143,7 +143,7 @@ impl QuicConnection<ToServer> {
     }
 
     #[inline]
-    /// Returns `None` if the driver is has closed the stream
+    /// Returns `None` if the driver has closed the stream
     pub async fn incoming(&mut self) -> Option<QuicStream> {
         self.incoming_recv.recv().await
     }

@@ -11,7 +11,7 @@ use rand::RngCore;
 /// This idea is "gefladert" (as we like to say in Austria) from nodejs, because I personally have no clue about crypto bullshit.
 ///      1. Create a `Vec<u8>` with the octets in the address the timestamp in seconds and the dcid of the connection.
 ///      2. Generate Random bytes.
-///      3. Encrypt the the `Vec<u8>` from step 1 with those random bytes and the servers encryption secret.
+///      3. Encrypt the `Vec<u8>` from step 1 with those random bytes and the servers encryption secret.
 ///      4. Append the random bytes at the end of the newly encrypted `Vec<u8>`.
 pub(crate) fn mint_token(
     dcid: &ConnectionId<'_>,

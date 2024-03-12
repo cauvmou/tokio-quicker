@@ -137,7 +137,7 @@ impl QuicListener {
         })
     }
 
-    /// Accepts a incoming connection.
+    /// Accepts an incoming connection.
     pub async fn accept(&mut self) -> Result<QuicConnection<ToClient>> {
         let manager::Client { connection, recv } = self.connection_recv.recv().await.unwrap();
 
